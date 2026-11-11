@@ -412,6 +412,12 @@ Newest entry at the bottom. Each entry gives the date, the block, what got done,
   - **GitHub.** The repo there still holds the first commit in its earlier form. The owner deletes and recreates that repo before the push, and the rebuilt history then goes up as a plain push.
   - **Next:** unchanged. The owner's push, pull request, video and form.
 
+- **2026-11-11, pushed.**
+  - The owner deleted the GitHub repo, and it was created again, empty and public. Grok pushed `main` and the tag `v0.1.0` at the owner's request.
+  - **Checked on an anonymous clone from GitHub:** 21 commits and the tag. Every author, committer and tagger line is `eightyFJ` with the no-reply address. A search of all history for a personal name, email address or user folder finds nothing, and gitleaks finds nothing. At the pinned commit `2f52d486367ea2a7a6ab5f4c67a59bd3902baa0d` the tree is the same as the local one, 254 unit tests run with 253 passing and 1 skipped, and `hermes plugins validate` passes all 15 checks.
+  - **Still not run:** `hermes plugins install` from GitHub, and the catalog CI.
+  - **Next:** the owner's pull request, video and form.
+
 ## 9. Decisions the owner needs to make
 
 1. Approve design decisions 1–8 above, or send back Grok's objections.
