@@ -128,6 +128,7 @@ class StrictContext:
 
     def __init__(self):
         self.hooks, self.middleware, self.commands, self.tools = [], [], [], []
+        self.cli_commands = []
 
     def register_hook(self, hook_name, callback, *, hold_stream=False):
         self.hooks.append((hook_name, callback))
@@ -140,6 +141,9 @@ class StrictContext:
 
     def register_tool(self, name, *a, **kw):
         self.tools.append(name)
+
+    def register_cli_command(self, name, help, setup_fn, handler_fn=None, description=""):
+        self.cli_commands.append((name, setup_fn, handler_fn))
 
 
 def manifest_list(text, key):
@@ -157,6 +161,7 @@ class Registration(unittest.TestCase):
         self.assertEqual(sorted(k for k, _ in ctx.middleware), sorted(manifest_list(manifest, "provides_middleware")))
         self.assertEqual(ctx.tools, manifest_list(manifest, "provides_tools"))
         self.assertEqual([n for n, _ in ctx.commands], ["cassette"])
+        self.assertEqual([n for n, _, _ in ctx.cli_commands], ["cassette"])
         self.assertRegex(manifest, r"(?m)^name: session-cassettes$")
 
     def test_callbacks_take_any_keywords(self):
@@ -188,6 +193,7 @@ class Registration(unittest.TestCase):
             "    def register_hook(self, n, cb, *, hold_stream=False): seen.append(['hook', n])\n"
             "    def register_middleware(self, k, cb): seen.append(['middleware', k])\n"
             "    def register_command(self, n, *a, **kw): seen.append(['command', n])\n"
+            "    def register_cli_command(self, n, *a, **kw): seen.append(['cli_command', n])\n"
             "m.register(Ctx())\n"
             "bad = [n for n in sys.modules if n.split('.')[0] in"
             " ('agent', 'gateway', 'hermes_cli', 'plugins', 'tools', 'hermes_constants')]\n"
@@ -198,7 +204,8 @@ class Registration(unittest.TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         report = json.loads(out.stdout.strip().splitlines()[-1])
         self.assertEqual(report["hermes"], [])
-        self.assertEqual(sorted(report["seen"]), [["command", "cassette"], ["hook", "post_llm_call"],
+        self.assertEqual(sorted(report["seen"]), [["cli_command", "cassette"], ["command", "cassette"],
+                                                  ["hook", "post_llm_call"],
                                                   ["hook", "pre_llm_call"], ["middleware", "tool_execution"]])
 
 

@@ -39,7 +39,7 @@ import time
 from collections import OrderedDict
 from typing import Any, Callable, Optional
 
-from . import arms, snapshot, store
+from . import arms, cli, snapshot, store
 
 logger = logging.getLogger(__name__)
 
@@ -901,3 +901,15 @@ def register(ctx: Any) -> None:
         description="Record this session's tool results as a replayable cassette",
         args_hint="record <name> | stop | status | pin <name> <fact> | list",
     )
+    # `hermes cassette ...` in a terminal: run, pin, list, show (cli.py). Hermes
+    # skips this one under plugins.isolation: host; the slash command still works.
+    register_cli = getattr(ctx, "register_cli_command", None)
+    if register_cli is not None:
+        register_cli(
+            "cassette",
+            help="Replay a recorded cassette offline and grade the answer",
+            setup_fn=cli.setup,
+            handler_fn=cli.handle,
+            description="Session Cassettes: replay a recorded request against another model, "
+                        "prompt or skill, with every tool call answered from the cassette.",
+        )
