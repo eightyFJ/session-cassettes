@@ -1,6 +1,6 @@
 # Session Cassettes — a Hermes Agent plugin (hackathon entry)
 
-**Status on 2026-11-10:** blocks A to F of `docs/PLAN.md` are done. The plugin is built, with 245 unit tests. It's installed and has run end to end in a live Hermes (`docs/TESTED.md`). The validator and security checks are in `docs/VALIDATION.txt` and `docs/SECURITY.md`. Block F changed the replay child from `hermes -z` (which auto-approves) to `hermes chat -Q`. Next is block G: the README and the catalog entry. The Progress log at the end of `docs/PLAN.md` says what is done and what is not yet tested.
+**Status on 2026-11-10:** blocks A to F of `docs/PLAN.md` are done. The plugin is built, with 249 unit tests. It's installed and has run end to end in a live Hermes (`docs/TESTED.md`). The validator and security checks are in `docs/VALIDATION.txt` and `docs/SECURITY.md`. Block F changed the replay child from `hermes -z` (which auto-approves) to `hermes chat -Q`. Next is block G: the README and the catalog entry. The Progress log at the end of `docs/PLAN.md` says what is done and what is not yet tested.
 
 ## What this is
 

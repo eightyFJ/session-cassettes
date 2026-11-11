@@ -95,6 +95,16 @@ Side finding: the wrong-map demo skill `tinyshop-layout` was still installed. Ar
 | 2026-11-10 | `verdict.py` changed after the gateway loaded | Refused: "runs a different version ... (1b73c1a286de85c0) than this folder (6059834b4122c5dc)". Exit 2. File restored. |
 | 2026-11-10 | `hermes plugins disable session-cassettes` + gateway restart | `hermes cassette` is not a command, so nothing can run. Re-enabled and restarted afterwards: PASS. |
 
+## After Grok's block F review
+
+The fixes are: no `HERMES_YOLO_MODE` in the child's environment, a session id required on both sides, stderr read from its end, and the ping before the arm (`docs/SECURITY.md`). Run after `hermes gateway restart`.
+
+| Date | Model | Result | Path | Time |
+|---|---|---|---|---|
+| 2026-11-11 | gpt-oss:20b | PASS 2/2 | 2 calls: 1 hit, 1 synthesized, 0 miss | 14 s |
+| 2026-11-11 | gpt-oss:20b | PASS 2/2 | 3 calls: 0 hit, 3 synthesized, 0 miss | 7 s |
+| 2026-11-11 | llama3.1:8b, launched with `HERMES_YOLO_MODE=1` in the shell | FAIL, 1 miss | `terminal docker inspect ...` (refused, never ran) | 11 s |
+
 ## Memory prefetch (decision 9 disclosure)
 
 Checked in the Hermes source and this machine's config, not in a live trace. Memory prefetch (`agent/turn_context.py:1078-1081`) runs only through a memory manager. Hermes creates one only when `memory.provider` names an external provider (`agent/agent_init.py:1211-1225`). This config sets no `memory.provider`, so **no prefetch runs on a replay turn here**. The built-in memory (`memories/MEMORY.md` and the user profile) is loaded from disk into the system prompt instead. That's a local read, with no tool call and no network, done the same way at record and at replay. If it changes between the two, the replay sees the new version. A user with an external memory provider (Honcho, RetainDB, ...) would get that provider's prefetch on replay. That was not tested.

@@ -603,6 +603,46 @@ class Preflight(CliCase):
         self.assertNotEqual(before, arms.code_version(folder))
         self.assertRegex(arms.CODE_VERSION, r"^[0-9a-f]{16}$")
 
+    def test_the_ping_happens_before_the_arm_exists(self):
+        # Grok, block F: an arm waiting during the ping could be claimed by another session.
+        self.make_cassette()
+        waiting_at_ping = []
+
+        def run_child(argv, timeout, cwd=None):
+            if argv[-1].startswith("--query=/cassette ping "):
+                waiting_at_ping.append(len(arms.waiting_arms(self.data)))
+            return cli.spawn(argv, timeout=timeout, cwd=cwd)
+
+        with self.plan():
+            v, _, _ = self.replay(run_child=run_child)
+        self.assertEqual(v.result, verdict.PASS, v.invalid_reasons)
+        self.assertEqual(waiting_at_ping, [0])
+
+    def test_no_session_id_on_stderr_is_invalid(self):
+        # Grok, block F: without the id, a foreign ledger whose answer (or its
+        # redacted copy) equals stdout would otherwise grade.
+        self.make_cassette()
+        with self.plan(session=""):
+            v, _, _ = self.replay()
+        self.assertEqual(v.result, verdict.INVALID)
+        self.assertTrue(any("no session id" in r for r in v.invalid_reasons), v.invalid_reasons)
+
+    def test_the_child_never_inherits_yolo_mode(self):
+        proc = mock.Mock(returncode=0)
+        with mock.patch.dict(os.environ, {"HERMES_YOLO_MODE": "1"}), \
+                mock.patch.object(cli.subprocess, "Popen", return_value=proc) as popen:
+            cli.spawn(["hermes.exe", "chat", "-Q", "--query=x"], timeout=5)
+        env = popen.call_args.kwargs["env"]
+        self.assertNotIn("HERMES_YOLO_MODE", {k.upper() for k in env})
+        self.assertEqual(env["PYTHONIOENCODING"], "utf-8")  # the rest of the environment is kept
+
+    def test_stderr_keeps_its_end(self):
+        with tempfile.TemporaryFile() as fh:
+            fh.write(b"x" * 50 + b"\nsession_id: S-end\n")
+            with mock.patch.object(cli, "MAX_CHILD_OUTPUT_BYTES", 20):
+                self.assertEqual(cli._read_back(fh), "x" * 20)
+                self.assertTrue(cli._read_back(fh, tail=True).endswith("session_id: S-end\n"))
+
     def test_a_malformed_pong_counts_as_no_pong(self):
         nonce = "cd" * 16
         path = arms.pong_path(self.data, nonce)

@@ -150,8 +150,11 @@ def build_child_argv(
     commands (``hermes_cli/gateway_chat.py:236``, ``tools/approval.py:388``).
     ``chat -Q`` is a finite single query: a dangerous command with nobody to
     approve it is denied (``approvals.single_query_mode``, default ``deny``).
-    So even a run whose claim failed, which runs tools live and is graded
-    INVALID, never gets an approval that nobody gave."""
+    So under Hermes's default approval settings, a run whose claim failed
+    (it runs tools live and is graded INVALID) gets no approval nobody gave.
+    Settings the user chose still apply: ``approvals.mode: off``,
+    ``single_query_mode: approve``, a permanent allowlist entry. ``spawn``
+    drops ``HERMES_YOLO_MODE`` from the child's environment."""
     if not isinstance(request, str) or not request:
         raise CliError("the cassette has no request to replay")
     argv = list(hermes)
@@ -200,8 +203,12 @@ def _decode(data: Any) -> str:
     return bytes(data).decode("utf-8", errors="replace")
 
 
-def _read_back(fh: Any) -> str:
-    fh.seek(0)
+def _read_back(fh: Any, tail: bool = False) -> str:
+    """Up to MAX_CHILD_OUTPUT_BYTES of the child's output: the start, or with
+    ``tail`` the end (stderr: the session id line comes last)."""
+    fh.seek(0, os.SEEK_END)
+    size = fh.tell()
+    fh.seek(max(0, size - MAX_CHILD_OUTPUT_BYTES) if tail else 0)
     return _decode(fh.read(MAX_CHILD_OUTPUT_BYTES))
 
 
@@ -214,6 +221,11 @@ def spawn(argv: Sequence[str], *, timeout: float, cwd: Optional[str] = None) -> 
     child process can outlive the launcher. A file can be read back at once."""
     env = dict(os.environ)
     env["PYTHONIOENCODING"] = "utf-8"  # the answer is compared character for character
+    # Hermes turns HERMES_YOLO_MODE in the launching shell into a yolo session
+    # (hermes_cli/gateway_chat.py, _ENV_LAUNCH_FLAGS), without --yolo on the
+    # command line. A replay child never inherits it.
+    for name in [k for k in env if k.upper() == "HERMES_YOLO_MODE"]:
+        del env[name]
     started = time.monotonic()
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
         try:
@@ -241,7 +253,7 @@ def spawn(argv: Sequence[str], *, timeout: float, cwd: Optional[str] = None) -> 
         except BaseException:  # Ctrl+C: don't leave the child running
             proc.kill()
             raise
-        return ChildResult(None if timed_out else proc.returncode, _read_back(out), _read_back(err),
+        return ChildResult(None if timed_out else proc.returncode, _read_back(out), _read_back(err, tail=True),
                            timed_out, time.monotonic() - started)
 
 
@@ -539,11 +551,13 @@ def _child_session_id(stderr: str) -> str:
 
 
 def _gateway_redact(text: str) -> str:
-    """What ``hermes chat -Q`` prints is the gateway's stored copy of the
-    answer, which Hermes redacts at that storage boundary
-    (``gateway/session_results.py``, ``redact_sensitive_text``). The hooks see
-    the answer before that, so ``AUTH_PORT = 8080`` in the ledger can print as
-    ``AUTH_PORT=***``. Returns the text unchanged if Hermes isn't importable."""
+    """The answer ``hermes chat -Q`` prints can be redacted where the hooks'
+    copy is not: seen live, ``AUTH_PORT = 8080`` in the ledger printed as
+    ``AUTH_PORT=***``, and ``redact_sensitive_text`` of the ledger answer
+    reproduces the printed text exactly. Where Hermes applies it was not
+    pinned down (not ``gateway/session_results.py``, which redacts only the
+    stored copy). A print path that redacts differently makes the run INVALID,
+    which fails safe. Returns the text unchanged if Hermes isn't importable."""
     try:
         from agent.redact import redact_sensitive_text
 
@@ -596,9 +610,11 @@ def replay(
     argv = build_child_argv(hermes, cassette.request, model=model, provider=provider,
                             skills=skills, workdir=workdir)
 
+    # The ping goes before the arm exists, so no other session can claim the
+    # arm while we wait for the gateway's answer.
+    preflight(base, hermes, workdir, run_child=run_child, timeout=min(timeout, PING_TIMEOUT_SECONDS))
     arm = arms.create_arm(base, name, cassette.request, model=model)
     try:
-        preflight(base, hermes, workdir, run_child=run_child, timeout=min(timeout, PING_TIMEOUT_SECONDS))
         started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         log(f"replaying {name!r} with {model or 'the default model'} in {workdir}")
         log("every tool call of the replayed turn is answered from the cassette; no tool runs. "
@@ -634,10 +650,17 @@ def replay(
                 if not child.timed_out and not _same_answer(ledger["final_answer"], child.stdout):
                     reasons.append("the claiming session's final answer is not what hermes printed, "
                                    "so the claim may belong to another session")
+            # The session id is what ties the claim to this child: the answer
+            # check alone can't, since it also accepts Hermes's redacted copy.
             child_session = _child_session_id(child.stderr)
-            if child_session and ledger["session_id"] and child_session != ledger["session_id"]:
-                reasons.append(f"hermes ran session {child_session}, but session "
-                               f"{ledger['session_id']} claimed this run")
+            if not child.timed_out:
+                if not child_session:
+                    reasons.append("hermes printed no session id, so the claim can't be tied to this run")
+                elif not ledger["session_id"]:
+                    reasons.append("the ledger names no session, so the claim can't be tied to this run")
+                elif child_session != ledger["session_id"]:
+                    reasons.append(f"hermes ran session {child_session}, but session "
+                                   f"{ledger['session_id']} claimed this run")
         v = verdict.compute_verdict(cassette.pins, answer, events, [c.key for c in cassette.calls], reasons)
         model_seen = ledger["model_seen"] if ledger is not None else ""
         if model and model_seen and model_seen != model and not model_seen.endswith(model):

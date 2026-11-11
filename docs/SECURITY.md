@@ -17,7 +17,7 @@ Results of the checks in `docs/PLAN.md` section 5a. Block F ran them on 2026-11-
 | SEC-9 | AI security review | Claude Code `/security-review` | **One real finding, fixed:** the replay child ran in an auto-approving mode. Two smaller items are fixed too. Details below. |
 | SEC-10 | Recheck the frozen commit | — | Block H. |
 
-Unit tests: `python -m unittest discover -s tests` gives **245 pass, 1 skipped** (the symlink test, which needs Developer Mode). That includes the gateway-check tests added after block F.
+Unit tests: `python -m unittest discover -s tests` gives **249 pass, 1 skipped** (the symlink test, which needs Developer Mode). That includes the gateway-check tests and the fixes from Grok's review, both added after block F.
 
 The scanners were installed with the owner's OK. bandit and semgrep went into a throwaway venv in Claude's scratchpad, not the system Python. gitleaks came from scoop. semgrep installed and ran on native Windows, so SEC-2 did not fall back to bandit alone. semgrep downloaded the `p/python` rules from its registry and ran with `--metrics=off`.
 
@@ -60,7 +60,7 @@ Claude Code's `/security-review` ran over the whole plugin. The diff was taken a
 **Fix.** The child is now `hermes [--model=M] [--provider=P] [--skills=S] [--in=DIR] chat -Q --query=<request>` (`cli.py`, `build_child_argv`). `chat -Q` is a finite single query that is **not** unattended. With no one to answer, a flagged command is denied by `approvals.single_query_mode`, which defaults to `deny` (`hermes_cli/config_defaults.py:1661`, `tools/approval.py:1302-1308`). Every value is still joined to its flag with `=` (SEC-4).
 
 **Two changes that came with it.**
-- *The printed answer is redacted.* `chat -Q` prints the gateway's stored copy of the answer, and Hermes redacts that copy (`gateway/session_results.py:35-41`). The hooks see the answer before that. So `AUTH_PORT = 8080` in the ledger printed as `AUTH_PORT=***`, and the stdout check marked 2 of 6 live runs INVALID. The check now accepts either the raw answer or Hermes's redacted copy of it (`cli.py`, `_same_answer`). Grading still uses the unredacted ledger answer.
+- *The printed answer can be redacted.* `AUTH_PORT = 8080` in the ledger printed as `AUTH_PORT=***`, and the stdout check marked 2 of 6 live runs INVALID. `redact_sensitive_text` of the ledger answer reproduces the printed text exactly. The check now accepts either the raw answer or that redacted copy (`cli.py`, `_same_answer`). Grading still uses the unredacted ledger answer. *(Corrected after Grok's review: this file first cited `gateway/session_results.py` as the place the printed copy is redacted. That module redacts only the stored copy, and `finish_result` returns the response unredacted. Where the printed text gets redacted was not pinned down. A print path that redacted differently would make a run INVALID, which fails safe.)*
 - *A stronger claim check.* `chat -Q` prints `session_id: <id>` on stderr. If that id differs from the session that claimed the arm, the run is INVALID. That catches "another session won the claim" directly, not just through the answer text.
 
 **Tested live** on 2026-11-10 (rows in `docs/TESTED.md`):
@@ -69,13 +69,29 @@ Claude Code's `/security-review` ran over the whole plugin. The diff was taken a
 
 **What the fix does not cover, said plainly.** In that same unclaimed run, the model worked around the denial with `rm ./victim/keep.txt` and `rmdir ./victim`. Hermes doesn't flag those, so they ran, and the folder was deleted. So `chat -Q` stops automatic approval of flagged commands. It does **not** make an unclaimed run harmless: any tool Hermes doesn't gate still runs live. The run is then graded INVALID ("no session claimed this run ... may have run with live tools"), but only after the child exits. The README must say this: a replay is offline only when its run is not INVALID.
 
-**Follow-up, built the same night: a gateway check before the run.** After writing the arm and before sending the request, `cassette run` sends `/cassette ping <nonce>` through `hermes chat -Q` (`cli.preflight`). That makes no model call. Hermes hands the slash command to the plugin's handler in the gateway, and the handler writes `pongs/<nonce>.json` with `arms.CODE_VERSION`, a hash of the plugin files taken when the module loaded. The run goes ahead only if the pong arrives and its version equals the CLI's own. Otherwise the CLI stops with "Nothing was replayed", and the arm and the pong are removed. This turns the most likely claim failures into refusals before anything runs: a gateway that hasn't loaded the plugin, or one still running older code.
+**Follow-up, built the same night: a gateway check before the run.** Before writing the arm (after Grok's review; it first ran between the arm and the request), `cassette run` sends `/cassette ping <nonce>` through `hermes chat -Q` (`cli.preflight`). That makes no model call. Hermes hands the slash command to the plugin's handler in the gateway, and the handler writes `pongs/<nonce>.json` with `arms.CODE_VERSION`, a hash of the plugin files taken when the module loaded. The run goes ahead only if the pong arrives and its version equals the CLI's own. Otherwise the CLI stops with "Nothing was replayed", and the arm and the pong are removed. This turns the most likely claim failures into refusals before anything runs: a gateway that hasn't loaded the plugin, or one still running older code.
 
 How we know the slash command runs in the gateway, not the CLI process: a recording started with `chat -Q --query="/cassette record f-record-q"` was saved by the next, separate `chat -Q --resume` process. The record request lives only in the gateway's memory.
 
 Tested live: the gateway still on the block F commit, with no `ping` verb, was refused in 5 s. After `hermes gateway restart` the run passed. One plugin file changed after the gateway loaded was refused, with both versions shown. With the plugin disabled, `hermes cassette` doesn't exist. Unit tests: no pong, an old version, a malformed pong, the ping's argv (`chat -Q`, no `--model`), and the pong file removed.
 
-What it doesn't cover: (a) a hot reload that registers the new command but leaves older hooks wired; Hermes's own note says hooks change only on a gateway restart. (b) Another session with the identical first message winning the claim during the run, which the stderr session-id check reports afterwards. (c) A `pre_llm_call` that times out. All three are rare and are graded INVALID.
+What it doesn't cover: (a) a second process that still holds older code; Grok found that a forced reload in the same process clears the old hooks, middleware and commands before `register` runs again (`hermes_cli/plugins_ledger.py`, `_reset_after_unload_all`). (b) Another session with the identical first message winning the claim during the run, which the stderr session-id check reports afterwards. (c) A `pre_llm_call` that times out. All three are rare and are graded INVALID.
+
+### Grok's review of the fix (`reviews/f-chat-q.md`), and what changed
+
+Grok confirmed that `chat -Q` is never unattended, that a slash command under `chat -Q` is dispatched in the gateway (`prompt.submit`, `MessageEvent.is_command`), and that a forced reload clears the old hooks before `register` runs again. It found three real gaps, all fixed and tested (249 tests):
+
+1. **`HERMES_YOLO_MODE` reached the child.** `spawn` copied the whole environment, and Hermes turns that variable into a yolo session (`hermes_cli/gateway_chat.py`, `_ENV_LAUNCH_FLAGS`) with no `--yolo` on the command line. `spawn` now drops it. Test: `test_the_child_never_inherits_yolo_mode`. Live: a replay started with `HERMES_YOLO_MODE=1` in the shell was claimed and graded as normal.
+2. **The session check could be skipped.** It ran only when the child printed a `session_id:` line and the ledger named a session. Because the answer check also accepts the redacted copy, a foreign `done` ledger could then supply the graded answer. Now a missing id on either side makes the run INVALID. stderr is also read from its **end** (the id line comes last), so 16 MiB of earlier stderr can't push the line out. Tests: `test_no_session_id_on_stderr_is_invalid`, `test_stderr_keeps_its_end`.
+3. **The arm waited during the ping.** `replay` armed first, then pinged (about 5 s), so another session with the same first message could claim the arm in that window. The ping now runs before the arm is created. Test: `test_the_ping_happens_before_the_arm_exists`.
+
+All four new tests fail against the previous `cli.py`. Live after `hermes gateway restart`: gpt-oss:20b PASS ×2, llama3.1:8b FAIL (refused `terminal`).
+
+**Accepted as is, said plainly:**
+- **The user's own approval settings still apply.** `approvals.mode: off`, `single_query_mode: approve`, a permanent allowlist entry, or an approval already cached for the session would approve a flagged command on an unclaimed run. The plugin changes none of them. The `build_child_argv` docstring now says "under Hermes's default approval settings" rather than "never".
+- **A forged pong.** Anyone who can write the plugin data folder can write a matching `pongs/<nonce>.json`. That's the same trust boundary as a tampered cassette: that writer could already edit Hermes's config.
+- The ping child's exit code is not checked. The pong file is the proof.
+- Under `plugins.isolation: host`, Grok did not trace whether the ping and `pre_llm_call` always run in the same interpreter. That mode is opt-in and untested.
 
 ### Item 2 (fixed): a cassette's request was not re-checked before a replay
 
