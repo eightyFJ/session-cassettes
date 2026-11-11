@@ -1,6 +1,6 @@
 # Block F recheck — yolo env, session id, ping order
 
-Written 2026-11-11. Read `cli.py` at `94856bc` (`git diff 0c846be..94856bc -- cli.py tests/`) before `reviews/f-chat-q.md` and before the "Grok's review of the fix" section in `docs/SECURITY.md`. Checked the launch flags and both `session_id:` printers against Hermes 0.23.1 (`hermes_cli/gateway_chat.py`, `hermes_cli/gateway_session_store.py`, `hermes_cli/cli_single_query.py`, `hermes_cli/gateway_agent.py`, `tools/approval.py`, `agent/session_client_env.py`). Did not re-run the tests.
+Written 2026-11-11. Read `cli.py` at `6c104db` (`git diff 09c7d92..6c104db -- cli.py tests/`) before `reviews/f-chat-q.md` and before the "Grok's review of the fix" section in `docs/SECURITY.md`. Checked the launch flags and both `session_id:` printers against Hermes 0.23.1 (`hermes_cli/gateway_chat.py`, `hermes_cli/gateway_session_store.py`, `hermes_cli/cli_single_query.py`, `hermes_cli/gateway_agent.py`, `tools/approval.py`, `agent/session_client_env.py`). Did not re-run the tests.
 
 ## 1. Does dropping `HERMES_YOLO_MODE` close the auto-approve path the child was opening?
 

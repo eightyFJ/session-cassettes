@@ -1,6 +1,6 @@
 # Security checks
 
-Results of the checks in `docs/PLAN.md` section 5a. Block F ran them on 2026-11-10 on native Windows 11 with Python 3.14.7 and Hermes Agent 0.23.1 (commit `3b421578`). The code checked is commit `aad5ca0` plus the uncommitted block F changes listed under SEC-9. Block H reruns SEC-1 to SEC-3 on the frozen commit (SEC-10) and adds those results here.
+Results of the checks in `docs/PLAN.md` section 5a. Block F ran them on 2026-11-10 on native Windows 11 with Python 3.14.7 and Hermes Agent 0.23.1 (commit `3b421578`). The code checked is commit `61b34ec` plus the uncommitted block F changes listed under SEC-9. Block H reran SEC-1 to SEC-3 before the freeze on 2026-11-11. Those results are under SEC-10 below.
 
 ## Summary
 
@@ -8,16 +8,18 @@ Results of the checks in `docs/PLAN.md` section 5a. Block F ran them on 2026-11-
 |---|---|---|---|
 | SEC-1 | Hermes install scan | `hermes plugins validate . --install-deps` | **Pass.** Every check passes, `security scan — safe`, no warnings. Full output in `docs/VALIDATION.txt`. |
 | SEC-2 | Static analysis | bandit 1.9.4, semgrep 1.185.0 (`p/python`) | **Pass.** semgrep: 0 findings from 151 rules. bandit: 0 high. One medium and eight lows, each explained below. |
-| SEC-3 | Secrets scan | gitleaks 8.30.1, plus a check by hand | **Pass.** No leaks in the full git history (4 commits) or in the working tree. No personal paths or email in tracked files. |
+| SEC-3 | Secrets scan | gitleaks 8.30.1, plus a check by hand | **Pass.** No leaks in the full git history (4 commits in block F; 10 commits when rerun on 2026-11-11) or in the working tree. No personal paths or email in tracked files. |
 | SEC-4 | Command injection | unit tests | **Pass** (block D, re-run after the SEC-9 change). |
 | SEC-5 | Path traversal | unit tests | **Pass** (block B). |
 | SEC-6 | Untrusted file parsing | unit tests | **Pass** (block B). |
 | SEC-7 | Fail closed in replay | unit tests, read of the code | **Pass** (block C). |
 | SEC-8 | Concurrency and atomic writes | unit tests | **Pass** (blocks B and C). |
 | SEC-9 | AI security review | Claude Code `/security-review` | **One real finding, fixed:** the replay child ran in an auto-approving mode. Two smaller items are fixed too. Details below. |
-| SEC-10 | Recheck the frozen commit | — | Block H. |
+| SEC-10 | Recheck the frozen commit | the SEC-1 to SEC-3 tools | **Pass before the freeze** (2026-11-11): the validator, bandit, semgrep and gitleaks are all clean on the code that goes into the freeze commit. Details under SEC-10 below. The same four run once more on the commit itself. |
 
-Unit tests: `python -m unittest discover -s tests` gives **251 pass, 1 skipped** (the symlink test, which needs Developer Mode). That includes the gateway-check tests and the fixes from Grok's review and recheck, all added after block F.
+Unit tests: `python -m unittest discover -s tests` runs **254 tests: 253 pass, 1 skipped** (the file-symlink escape test, which needs Developer Mode). Under Linux (Ubuntu 22.04 in WSL, Python 3.10, run in block H) that test runs and passes; 253 pass there as well, and the 1 skipped is the Windows launcher test. The 254 include the gateway-check tests, the fixes from Grok's review and recheck, the login-store skip test from Grok's README review, and the two link tests from the block H code read. *(Corrected 2026-11-11: this line used to say "251 pass, 1 skipped" when the suite had 251 tests, which was 250 passing and 1 skipped. The older "N pass, 1 skipped" figures in the Progress log likely have the same slip. They were not rechecked.)*
+
+**Added after Grok's README review (`reviews/g-readme.md`, finding 1): login stores are skipped by name.** The snapshot skipped key and credential files by name, but not `auth.json`, which catalog rule 11 names as a file a plugin never reads. A workspace file called `auth.json` that a recorded result named would have been read from disk and stored after redaction. `snapshot._SECRET_GLOBS` now also lists `auth.json`, `token.json` and `tokens.json`. Test: `test_login_store_names_are_skipped`, which fails against the old list. The skip is still by file name: a token in a file with an ordinary name is read and relies on Hermes's redaction. The README says so.
 
 The scanners were installed with the owner's OK. bandit and semgrep went into a throwaway venv in Claude's scratchpad, not the system Python. gitleaks came from scoop. semgrep installed and ran on native Windows, so SEC-2 did not fall back to bandit alone. semgrep downloaded the `p/python` rules from its registry and ran with `--metrics=off`.
 
@@ -40,12 +42,16 @@ Command: `bandit -r . -x ./tests,./spikes`. It scanned 2,685 lines.
 
 semgrep `p/python` over the six plugin modules (`tests`, `spikes` and `demo` excluded) gives 0 findings.
 
+**Rerun on 2026-11-11 (README audit).** The code is commit `0fc976c` plus the uncommitted `snapshot.py` skip-list change. That is three commits after the scan above: the ping, the yolo checks and the mandatory session id came in between. bandit 1.9.4, same command, 2,856 lines: the same nine findings and nothing new. The line numbers are now `__init__.py:310,379,384`, `arms.py:185,358`, `cli.py:33,239`, `verdict.py:25` and `demo/fixture-repo/client/login.py:10`. `hermes plugins validate . --install-deps` passes with no warnings. **semgrep was not rerun**, so its 0 findings still describe the block F code. SEC-10 covers it.
+
 **No network, telemetry or self-update.** A grep of the six plugin modules for `urllib`, `http.`, `httpx`, `aiohttp`, `socket`, `requests`, `subprocess`, `importlib`, `reload`, `os.system`, `os.popen`, `shell=True`, `eval(`, `exec(`, `pickle`, `yaml.load`, `marshal`, `__import__` and `ctypes` finds only `cli.py`'s `subprocess` (SEC-4) and a docstring in `store.py` saying it never uses pickle, eval or YAML.
 
 ## SEC-3: secrets
 
 - `gitleaks git .`: 4 commits, about 400 KB, no leaks.
 - `gitleaks dir .`: about 900 KB, no leaks.
+- Rerun on 2026-11-11 after block G, with the README, the catalog draft and the snapshot fix still uncommitted: `gitleaks git .` over 10 commits (about 500 KB), no leaks. `gitleaks dir .` over the working tree (about 1.07 MB), no leaks. SEC-10 in block H runs both again on the frozen commit.
+- Rerun again on 2026-11-11 during the README audit, before the audit's doc edits: 10 commits, no leaks. Working tree (about 1.10 MB), no leaks.
 - By hand: `git grep` for the owner's email, the Windows user folder and its Git Bash and forward-slash forms finds nothing in tracked files. No cassette, run file, ledger or log is tracked. They all live under `%LOCALAPPDATA%\hermes\plugin-data\session-cassettes`, outside the repo. The demo fixture holds no real secrets, only a fake app.
 - **Not a leak, but the owner's call before the push:** `LICENSE` and the commit author carry the owner's name, and the commit metadata carries his email. `AGENTS.md` and `docs/PLAN.md` name the owner, Grok and Arete as the team (see PLAN section 7).
 
@@ -123,6 +129,35 @@ Checked against the real `agent.redact`: for a Hermes-home `config.yaml`, the pl
 - **Isolation:** bindings are keyed by session and turn. A claim needs a first turn, platform `cli`, an exact text match and an `O_EXCL` create.
 - **Terminal allowlist:** a replay never runs a command. A bypass of the record-time allowlist can only make a cassette stale. It can't cause a side effect.
 - **Snapshot:** paths must sit inside the workspace (re-checked with `realpath`). Hidden and secret-looking names are skipped. Only regular UTF-8 files up to 512 KB are kept. A file is skipped if redaction raises. Paths come only from successful tool results, which Hermes's own read denylist has already filtered.
+
+## SEC-10: rerun before the freeze (block H, 2026-11-11)
+
+The code scanned is commit `0fc976c` plus the uncommitted changes that go into the freeze commit: the login-store skip in `snapshot.py`, the block H link fix in `snapshot.py` (below), and `plugin.yaml`'s description. Every scan below ran after the last of those changes. Same machine and tool versions as block F.
+
+| Check | Command | Result |
+|---|---|---|
+| SEC-1 | `hermes plugins validate . --install-deps`, and again with `--json` | Exit 0. All 15 checks pass, `security scan — safe`, `"warnings": []`, host-ready. |
+| SEC-2 | `semgrep scan --config p/python --metrics=off` over the six plugin modules (semgrep 1.185.0) | 0 findings, 151 rules, 6 files. This is the first semgrep run since block F, so it is the first to cover the ping, the yolo checks, the mandatory session id and both `snapshot.py` changes. |
+| SEC-2 | `bandit -r . -x ./tests,./spikes` (bandit 1.9.4), 2,860 lines | The same nine findings as before and nothing new: 0 high, 1 medium (`demo/fixture-repo/client/login.py:10`, not plugin code), 8 low (`__init__.py:310,379,384`, `arms.py:185,358`, `cli.py:33,239`, `verdict.py:25`). Each is explained under SEC-2 above. |
+| SEC-3 | `gitleaks git .` (gitleaks 8.30.1) | 10 commits, about 498 KB, no leaks. |
+| SEC-3 | `gitleaks dir .` | Working tree, about 1.12 MB, no leaks. |
+| SEC-3 | By hand | A search of every tracked file, and every untracked file that goes into the freeze commit, for the owner's email and for his Windows user folder in its backslash, forward-slash and Git Bash forms finds only the sentence under SEC-3 that describes the check. No cassette, run file, ledger or log is among those files. |
+
+**After those scans, before the freeze (same day).** Three things changed, none of them plugin code. `spikes/` was moved out of the repo, so bandit was rerun as `bandit -r . -x ./tests`: the same nine findings, 2,860 lines. Five unit tests that assert Windows path rules now run on Windows only, and the suite was run under Linux as well (254 run, 253 pass, 1 skipped on each system; `docs/TESTED.md`). Seven unpushed commits were rebuilt with one line of `docs/PLAN.md` reworded, and `gitleaks git` was rerun on the rebuilt history: 10 commits, no leaks. The validator still passes with no warnings, and `gitleaks dir` still finds nothing.
+
+**What is left for the commit itself.** These scans read the working tree, not a commit. Once the freeze commit exists, the same four run again on it, and `gitleaks git` then covers 11 commits. Nothing in the six modules changes between this rerun and the commit.
+
+**The code read found one bug, fixed: a workspace behind a link got no snapshot.** `snapshot.capture` refuses a file whose real path leaves the workspace. It compared the file's real path with the workspace path as given. If the workspace path itself runs through a link (a Windows junction, a symlinked folder, `/tmp` on macOS), every file's real path is outside it, so every file was skipped as "link points outside the workspace" and the cassette had no snapshot. That failed safe, with a warning in the cassette, but replays then had only exact hits to go on. The check now also accepts a real path under the workspace's own real path. Tests: `test_workspace_reached_through_a_link` (fails against the old code, and also checks that a link leading out of such a workspace is still refused) and `test_directory_link_escape` (an escape through a junction, which runs on Windows without Developer Mode; the file-symlink version is still skipped here). **Not reproduced live:** in two live recordings started from a junction, Hermes had already resolved the path before the plugin saw it (`docs/TESTED.md`). So on this machine the bug could be reached only in a unit test.
+
+**Read and left as they are.** Listed so nobody has to find them twice. Only the first two are about a tool running live.
+- *A session id that changes mid-turn.* If Hermes rotates the session id during the replayed turn, later tool calls of that turn carry an id the plugin has not bound, and they run live. The ledger then never reaches `done`, so the run is INVALID. This is the same class as an unclaimed run: reported afterwards, not prevented. Grok's recheck covered the reporting half. Whether 0.23.1 rotates the id inside a turn was not traced.
+- *A tool call with no session id* passes through uncounted. Both of Hermes's call sites pass the agent's session id (`agent/tool_executor.py` and `agent/agent_runtime_helpers.py`, through `tool_hook_ids`), so this needs a session with no id. A claimed replay always has one, because the binding is keyed on it.
+- *Event keys are not shortened.* A miss on a call with very large arguments (a `write_file` body, say) puts the whole argument text into the ledger and the run file. Past 32 MB the ledger can't be read back, and the run is INVALID.
+- *The snapshot keeps reading named files after its 8 MB cap is reached*, and skips each one only after reading and redacting it. Slow on a huge search result, not wrong.
+- *A regular expression that ripgrep accepts and Python doesn't* (a Unicode class such as `\p{L}`, or `[[:alpha:]]`) gets a made-up "regex parse error" or no matches, counted as synthesized and not as a miss. This is the stated limit of the Python search, seen from the verdict's side.
+- *A cassette request holding a NUL character* (a hand-edited file) is not refused before the child starts. Python then refuses to start the child with a traceback, not a clean message. The arm is removed and nothing runs.
+- *Cassette names that differ only by case.* On Windows, `run demo` for a cassette saved as `Demo` finds the file and then refuses it, because the name inside doesn't match. A clean error, but a confusing one.
+- *A new record binding can replace a replay binding of the same session without retiring it*, if a first-turn claim that outlived its hook timeout lands between two steps of that session's next turn. A `chat -Q` session has one turn, so this was not pursued.
 
 ## Known residual risks (for the README)
 

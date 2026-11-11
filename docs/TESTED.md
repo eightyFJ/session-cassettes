@@ -16,8 +16,8 @@ Recording works headlessly. A slash command sent through `-z` reaches the plugin
 |---|---|---|---|---|
 | 2026-11-10 | arete:27b | PASS 2/2 | 5 calls: 1 hit, 4 synthesized, 0 miss | 21 s |
 | 2026-11-10 | arete:27b | DIVERGED 2/2 | 6 calls: 1 hit, 4 synthesized, 1 miss (`terminal ls -la /c/repo/apps/tinyshop-demo`) | 52 s |
-| 2026-11-10 | arete:27b | PASS 2/2 | 3 calls: 1 hit, 2 synthesized, 0 miss | 15 s |
-| 2026-11-10 | arete:27b | PASS 2/2 | 3 calls: 1 hit, 2 synthesized, 0 miss | 19 s |
+| 2026-11-10 | arete:27b | PASS 2/2 | 3 calls: 1 hit, 2 synthesized, 0 miss | 13 s |
+| 2026-11-10 | arete:27b | PASS 2/2 | 3 calls: 1 hit, 2 synthesized, 0 miss | 16 s |
 | 2026-11-10 | gpt-oss:20b | PASS 2/2 | 3 calls: 0 hit, 3 synthesized, 0 miss | 17 s |
 | 2026-11-10 | gpt-oss:20b | PASS 2/2 | 3 calls: 1 hit, 2 synthesized, 0 miss | 7 s |
 | 2026-11-10 | llama3.1:8b | FAIL 0/2, 1 miss | `terminal docker inspect auth_handler` (refused, never ran) | 10 s |
@@ -78,7 +78,7 @@ What these runs show:
 
 | Date | Model | How | Result |
 |---|---|---|---|
-| 2026-11-10 | arete:27b | `hermes chat -Q "--query=/cassette record f-record-q"` in the demo folder, then `hermes chat -Q --resume=<the session_id it printed on stderr> "--query=<request>"` | Saved in 79 s: 4 recorded calls, correct answer. |
+| 2026-11-10 | arete:27b | `hermes chat -Q "--query=/cassette record f-record-q"` in the demo folder, then `hermes chat -Q --resume=<the session_id it printed on stderr> "--query=<request>"` | Saved in 79 s: 4 recorded calls, 2 snapshot files, correct answer. One `terminal` call ran live and was not kept, so the cassette carries the "may not replay cleanly" warning. It was never pinned or replayed. |
 
 This is the headless record route that doesn't auto-approve (`-z` does). It also shows that a slash command sent through `chat -Q` runs in the gateway: the record request lives only in the gateway's memory, and a separate process's turn picked it up. Run from PowerShell; Git Bash rewrites the `/` even inside `--query=/...`.
 
@@ -105,6 +105,71 @@ The fixes are: no `HERMES_YOLO_MODE` in the child's environment, a session id re
 | 2026-11-11 | gpt-oss:20b | PASS 2/2 | 3 calls: 0 hit, 3 synthesized, 0 miss | 7 s |
 | 2026-11-11 | llama3.1:8b, launched with `HERMES_YOLO_MODE=1` in the shell | FAIL, 1 miss | `terminal docker inspect ...` (refused, never ran) | 11 s |
 
+## Block G (README output samples)
+
+Run 2026-11-11 to capture real output for the README, with `NO_COLOR=1`. Same cassette and workspace as above.
+
+| Date | Model | Result | Path | Time |
+|---|---|---|---|---|
+| 2026-11-11 | gpt-oss:20b | PASS 2/2 | 2 calls: 1 hit, 1 synthesized, 0 miss | 11 s |
+| 2026-11-11 | llama3.1:8b | FAIL 0/2, 1 miss | `terminal netstat -tlnp \| grep auth_handler` (refused, never ran) | 8 s |
+| 2026-11-11 | gpt-oss:20b | PASS 2/2 | 2 calls: 0 hit, 2 synthesized, 0 miss. After `hermes gateway restart` for the block G `plugin.yaml` change. | 14 s |
+| 2026-11-11 | gpt-oss:20b | PASS 2/2 | 3 calls: 0 hit, 3 synthesized, 0 miss. After `hermes gateway restart` for the `snapshot.py` skip-list change (Grok's README review, finding 1). | 13 s |
+
+**Tally of `chat -Q` replays of `e2e-probe` up to here**, counted from the rows in this file: gpt-oss:20b PASS ×12, DIVERGED ×1, INVALID ×2 (both before the redaction fix). llama3.1:8b FAIL ×4. `e2e-tampered` with gpt-oss:20b FAIL ×1. The "re-enabled and restarted afterwards: PASS" line in the gateway-check table names no model and is not counted. **This tally is 3 PASS runs short of the saved run files. The next section has the full count.**
+
+## Checked against the saved run files (README audit, 2026-11-11)
+
+The Fable 5.2 audit read every run file under `plugin-data\session-cassettes\runs\`: 32 for `e2e-probe` and 3 for `e2e-tampered`. Every row above has its file, and the result, calls and time match. The two Arete times that did not match (15 s and 19 s) are corrected above to 13 s and 16 s. Three gpt-oss:20b PASS runs through `chat -Q` had a file but no row:
+
+| Date (EST) | Run file stamp (UTC) | Model | Result | Path | Time |
+|---|---|---|---|---|---|
+| 2026-11-10 23:32 | 2026-11-11T04:32:28 | gpt-oss:20b | PASS 2/2 | 1 call: 0 hit, 1 synthesized, 0 miss | 8 s |
+| 2026-11-11 00:11 | 2026-11-11T05:11:54 | gpt-oss:20b | PASS 2/2 | 9 calls: 0 hit, 9 synthesized, 0 miss | 12 s |
+| 2026-11-11 00:24 | 2026-11-11T05:24:57 | gpt-oss:20b | PASS 2/2 | 5 calls: 0 hit, 5 synthesized, 0 miss | 14 s |
+
+By their times, the first is the "re-enabled and restarted afterwards: PASS" line in the gateway-check table, and the second is the replay after the yolo-pong change (`docs/SECURITY.md`, Grok's recheck). The third has no note anywhere. Which step each belonged to is read from the timestamps, not from a log.
+
+**Full tally of `chat -Q` replays of `e2e-probe`, from the run files:** gpt-oss:20b 18 runs: PASS ×15, DIVERGED ×1, INVALID ×2 (both before the redaction fix). llama3.1:8b FAIL ×4. `e2e-tampered` with gpt-oss:20b FAIL ×1, and in all three tampered runs (two through `-z`) the answer said 9090. Through `-z`, 10 runs of `e2e-probe`: Arete PASS ×3 and DIVERGED ×1, gpt-oss:20b PASS ×2, llama3.1:8b FAIL ×2, wrong skill FAIL ×2.
+
+## The README walkthrough from start to finish (README audit, 2026-11-11)
+
+Until this run, no cassette recorded through `chat -Q` had been replayed: every replay used `e2e-probe`, recorded through `-z`. This run used the README's own commands, from PowerShell, in the demo folder, under the name `walkthrough-check`.
+
+| Step | Command | Result |
+|---|---|---|
+| Arm | `hermes chat -Q "--query=/cassette record walkthrough-check"` | "Recording is armed", `session_id:` on stderr, exit 0. |
+| Record | `hermes chat -Q --resume=<that id> "--query=<request>"`, arete:27b | Saved in 46 s: 5 recorded calls (3 `search_files`, 2 `read_file`), 5 snapshot files, correct answer. One warning: 1 named path left out of the snapshot (hidden path). Hermes printed "found but has no messages. Starting fresh." and kept the same session id. |
+| Pin | `hermes cassette pin walkthrough-check auth.py`, then `8080` | 2 pins. |
+| Replay | `hermes cassette run walkthrough-check --model gpt-oss:20b` | PASS 2/2, 4 calls: 0 hit, 4 synthesized, 0 miss. 15 s. Exit 0. |
+
+The ping accepted the gateway, so the gateway was running this folder's code.
+
+## Block H pre-freeze checks (2026-11-11)
+
+The pre-freeze code read changed one thing in `snapshot.py`: a workspace whose own path runs through a link (a junction, a symlinked folder) no longer has every file skipped as "link points outside the workspace" (`docs/PLAN.md`, Progress log). `hermes gateway restart` came first (PID 23916), and the ping accepted the gateway in both replays below, so the gateway ran this folder's code. All commands were run from PowerShell.
+
+| Cassette | Step | Result |
+|---|---|---|
+| `h-freeze-check` | Record, arete:27b, the README's two `chat -Q` commands in the demo folder | Saved in 34 s: 3 recorded calls (all `search_files`), 7 snapshot files, correct answer. One warning: 2 named paths left out of the snapshot (hidden path). |
+| `h-freeze-check` | `hermes cassette run h-freeze-check --model gpt-oss:20b` | PASS 2/2, 5 calls: 0 hit, 5 synthesized, 0 miss. 14 s. Exit 0. |
+| `h-junction-check` | Record, arete:27b, the same two commands after `cd` into a junction that points at the demo folder | Saved in 39 s: 5 recorded calls (1 `search_files`, 4 `read_file`), 5 snapshot files, correct answer, no warning. **The cassette's `cwd` is the real folder, not the junction:** Hermes resolved the link before the plugin saw the path. |
+| `h-junction-check` | `hermes cassette run h-junction-check --model gpt-oss:20b` | PASS 2/2, 3 calls: 1 hit, 2 synthesized, 0 miss. 13 s. Exit 0. |
+| `h-junction-in` | Record, arete:27b, from another folder with `hermes --in=<junction> chat -Q ...` | Saved in 38 s: 2 recorded calls, 2 snapshot files, correct answer. One `terminal` call ran live, so it carries the "may not replay cleanly" warning. `cwd` is again the real folder. Not pinned or replayed. |
+
+What these runs show, and what they don't:
+- Recording and replay work on the changed code.
+- **The junction runs did not exercise the fix.** In both routes Hermes handed the plugin the resolved path, so the plugin never saw a workspace behind a link. The fix is covered by unit tests only (`test_workspace_reached_through_a_link`, which fails against the old code, and `test_directory_link_escape`). Whether any other route hands over an unresolved path (the desktop app, macOS, Linux) was not checked.
+- `h-freeze-check` is still in the plugin data folder. The two junction cassettes and the junction run file were moved to `C:\repo\_archive\session-cassettes-block-h-2026-11-11`.
+
+**Unit tests under Linux (2026-11-11).** `python3 -m unittest discover -s tests`, run from this folder in WSL (Ubuntu 22.04.5, Python 3.10.12): 254 run, 253 pass, 1 skipped.
+- The first run had 5 that did not pass. All five assert Windows path rules: the `.cmd` launcher test (it sets `os.name` to `nt`, and Python can only build Windows paths on Windows), two `safe_join` cases (a drive path and a network path, which are ordinary file names off Windows), and two path spellings (the Git Bash form, and upper case with backslashes).
+- Those five now run on Windows only. No plugin code changed. On Windows the suite is unchanged: 254 run, 253 pass, 1 skipped.
+- The file-symlink escape test, which Windows skips without Developer Mode, ran on Linux and passed. The 1 skipped on Linux is the launcher test.
+- **This is not a test of the plugin inside Hermes on Linux.** That distro has no Hermes, and its Python 3.10 is older than Hermes's minimum of 3.11.
+
+**Argument passing through the real `hermes.exe` (SEC-4, live).** The SEC-4 unit test sends a hostile request to a Python child, not through Hermes's own launcher. One live check: Python's `subprocess` with an argument list and no shell started `hermes.exe chat -Q "--query=/cassette record <text>"`, where `<text>` held `"`, `'`, `%PATH%`, `&`, `|`, `;`, `^`, `$HOME` and a backtick. The plugin's handler in the gateway refused it as an invalid cassette name and echoed the text back unchanged, in 3 s. Nothing was armed. This was a slash command, not a model turn, and the text had no spaces or newlines.
+
 ## Memory prefetch (decision 9 disclosure)
 
 Checked in the Hermes source and this machine's config, not in a live trace. Memory prefetch (`agent/turn_context.py:1078-1081`) runs only through a memory manager. Hermes creates one only when `memory.provider` names an external provider (`agent/agent_init.py:1211-1225`). This config sets no `memory.provider`, so **no prefetch runs on a replay turn here**. The built-in memory (`memories/MEMORY.md` and the user profile) is loaded from disk into the system prompt instead. That's a local read, with no tool call and no network, done the same way at record and at replay. If it changes between the two, the replay sees the new version. A user with an external memory provider (Honcho, RetainDB, ...) would get that provider's prefetch on replay. That was not tested.
@@ -112,5 +177,16 @@ Checked in the Hermes source and this machine's config, not in a live trace. Mem
 ## Not tested yet
 
 - A replay with the network off. The "offline" claim rests on the miss path, the unit tests, and the refused `terminal` and `execute_code` calls above.
-- Recording from the desktop app's chat box (only the `-z` + `--resume` route was used).
+- Recording from the desktop app's chat box or an interactive `hermes` session. Only the two headless routes were used: `-z` + `--resume`, and `chat -Q` + `--resume`.
 - An external memory provider.
+- `hermes cassette run --skill` through the current `chat -Q` child. The two wrong-skill runs went through `-z`.
+- A snapshot of a workspace that holds an `auth.json` or `token.json`, live. The skip is a unit test (`test_login_store_names_are_skipped`).
+- Installing the plugin from GitHub or from the catalog. Every run used the repo linked into the plugins folder.
+- An Arete replay through `chat -Q`. Arete's four replays went through `-z`.
+- A replay after a prompt change. Only the model was varied through `chat -Q`.
+- Two replays overlapping. A second run is refused only while the first is still waiting to be claimed.
+- `hermes cassette run` with `--provider`, with `--timeout`, or with `--in` set to a folder other than the recorded one. The in-session `/cassette stop`, `status`, `pin` and `list`. All of these have unit tests only.
+- A recording with Hermes's redaction switched off (`security.redact_secrets: false`). By the Hermes source, the snapshot would then be stored unredacted.
+- `plugins.isolation: host`. By the Hermes source (`hermes_cli/plugin_isolation.py`), `hermes cassette` is not registered in that mode, so replay would not be available.
+- The walkthrough commands from cmd. Only PowerShell was used.
+- A workspace that the plugin sees through a link. Hermes resolved the junction in both live tries, so the block H fix has unit tests only.

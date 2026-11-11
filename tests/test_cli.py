@@ -334,6 +334,7 @@ class CommandInjection(CliCase):
                 if path.name != "cli.py":
                     self.assertNotIn("subprocess", text)
 
+    @unittest.skipUnless(os.name == "nt", "sets os.name to 'nt', and pathlib can only build Windows paths on Windows")
     def test_batch_wrappers_are_refused_on_windows(self):
         bat = self.root / "hermes.cmd"
         bat.write_text("@echo off\n", encoding="utf-8")

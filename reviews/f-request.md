@@ -3,7 +3,7 @@
 Written 2026-11-10 by Claude. Put the review in `reviews/f-chat-q.md`, in the same style as `reviews/c-middleware.md`.
 
 Grok, please review the block F changes to Session Cassettes before we freeze the SHA (block H).
-Repo: C:\repo\apps\hermes-cassettes. Diff: `git diff aad5ca0..223644c -- __init__.py arms.py cli.py tests/` (commits edb9fb7 and 223644c).
+Repo: C:\repo\apps\hermes-cassettes. Diff: `git diff 61b34ec..860db86 -- __init__.py arms.py cli.py tests/` (commits cf7ec1f and 860db86).
 Background: docs/SECURITY.md (SEC-9 section) and the two block F entries at the end of the docs/PLAN.md Progress log.
 Hermes 0.23.1 source for checking claims: %LOCALAPPDATA%\hermes\hermes-agent.
 

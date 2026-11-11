@@ -5,7 +5,7 @@ Written 2026-11-11 by Claude. Put the recheck in `reviews/f-chat-q-recheck.md`, 
 Grok, your block F review is `reviews/f-chat-q.md`. These are the fixes for it. Please check that each one closes what you found and opens nothing new.
 
 - Repo: `C:\repo\apps\hermes-cassettes`.
-- Diff: `git diff 0c846be..94856bc -- cli.py tests/`. Only `cli.py` and `tests/test_cli.py` changed in code.
+- Diff: `git diff 09c7d92..6c104db -- cli.py tests/`. Only `cli.py` and `tests/test_cli.py` changed in code.
 - Background: the "Grok's review of the fix" section of `docs/SECURITY.md`, and the 2026-11-11 entry in the `docs/PLAN.md` Progress log.
 - Hermes 0.23.1 source: `%LOCALAPPDATA%\hermes\hermes-agent`.
 

@@ -43,7 +43,12 @@ class Sec5PathTraversal(unittest.TestCase):
 
     def test_safe_join_refuses_escape(self):
         with tempfile.TemporaryDirectory() as d:
-            for parts in [("..", "x"), ("cassettes", "..", "..", "x"), ("C:\\x",), ("\\\\server\\share",), ("",)]:
+            escapes = [("..", "x"), ("cassettes", "..", "..", "x"), ("",)]
+            if os.name == "nt":
+                # Only Windows reads these as a drive path and a network path.
+                # Elsewhere each is one ordinary file name inside the folder.
+                escapes += [("C:\\x",), ("\\\\server\\share",)]
+            for parts in escapes:
                 with self.subTest(parts=parts):
                     with self.assertRaises(store.CassetteError):
                         store.safe_join(d, *parts)

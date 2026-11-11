@@ -116,6 +116,18 @@ class CaptureTests(Base):
         self.assertEqual(notes["server"], "not a regular file")
         self.assertEqual(notes[self.ws], "outside the workspace")
 
+    def test_login_store_names_are_skipped(self):
+        # Catalog rule 11: a plugin never reads auth.json or another login store.
+        names = ["auth.json", "Auth.JSON", "token.json", "tokens.json", "server/auth.json"]
+        for name in names:
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('{"access_token": "x"}')
+        notes = dict(snapshot.capture(self.cas, names))
+        self.assertEqual(self.cas.snapshot, {})
+        for name in names:
+            self.assertEqual(notes[name], "secret-looking file name", name)
+
     def test_total_cap(self):
         notes = snapshot.capture(self.cas, ["server/auth.py", "server/catalog.py"],
                                  max_total_bytes=len(AUTH) + 5)
@@ -148,6 +160,72 @@ class CaptureTests(Base):
             (outside / "secret.txt").unlink()
             outside.rmdir()
 
+    def _link_dir(self, target: Path, link: Path) -> None:
+        """Make ``link`` a directory link to ``target``: a symlink, or on Windows
+        a junction, which needs no Developer Mode."""
+        try:
+            os.symlink(target, link, target_is_directory=True)
+            return
+        except (OSError, NotImplementedError):
+            pass
+        try:
+            import _winapi
+
+            _winapi.CreateJunction(str(target), str(link))
+        except Exception:
+            self.skipTest("cannot create a directory link here")
+
+    @staticmethod
+    def _unlink_dir(link: Path) -> None:
+        for remove in (os.unlink, os.rmdir):  # a symlink, then a junction
+            try:
+                remove(link)
+                return
+            except OSError:
+                pass
+
+    def test_directory_link_escape(self):
+        outside = Path(tempfile.mkdtemp()).resolve()
+        link = self.root / "linked"
+        try:
+            (outside / "secret.txt").write_text("s\n")
+            self._link_dir(outside, link)
+            notes = snapshot.capture(self.cas, ["linked/secret.txt"])
+            self.assertEqual(notes, [("linked/secret.txt", "link points outside the workspace")])
+            self.assertEqual(self.cas.snapshot, {})
+        finally:
+            self._unlink_dir(link)
+            (outside / "secret.txt").unlink()
+            outside.rmdir()
+
+    def test_workspace_reached_through_a_link(self):
+        # The working directory can itself sit behind a link (a Windows junction,
+        # macOS's /tmp). Its files are still inside the workspace; a link inside
+        # it that leads out is still refused.
+        holder = Path(tempfile.mkdtemp()).resolve()
+        outside = Path(tempfile.mkdtemp()).resolve()
+        ws = holder / "ws-link"
+        escape = self.root / "linked"
+        try:
+            (outside / "secret.txt").write_text("s\n")
+            self._link_dir(self.root, ws)
+            self._link_dir(outside, escape)
+            cas = store.Cassette(name="t", cwd=str(ws), workspace=str(ws))
+            notes = snapshot.capture(cas, ["server/auth.py", str(ws / "client" / "login.js"),
+                                           "linked/secret.txt"])
+            self.assertEqual(notes, [("linked/secret.txt", "link points outside the workspace")])
+            self.assertEqual(len(cas.snapshot), 2)
+            key = store.normalize_path(ws / "server" / "auth.py")
+            self.assertEqual(cas.snapshot[key]["text"], AUTH)
+            read = json.loads(snapshot.synthesize(cas, "read_file", {"path": "server/auth.py"}))
+            self.assertIn("AUTH_PORT = 8080", read["content"])
+        finally:
+            self._unlink_dir(escape)
+            self._unlink_dir(ws)
+            holder.rmdir()
+            (outside / "secret.txt").unlink()
+            outside.rmdir()
+
     def test_no_workspace(self):
         cas = store.Cassette(name="t", cwd=self.ws)
         self.assertEqual(snapshot.capture(cas, ["server/auth.py"]), [("*", "cassette has no workspace")])
@@ -170,8 +248,13 @@ class SynthReadTests(Base):
 
     def test_path_spellings_hit_the_same_entry(self):
         self.capture_all()
-        msys = "/" + str(self.root)[0].lower() + str(self.root)[2:].replace("\\", "/") + "/server/auth.py"
-        for p in ["./server/auth.py", str(self.root / "server" / "auth.py"), msys, "SERVER\\AUTH.PY"]:
+        spellings = ["./server/auth.py", str(self.root / "server" / "auth.py")]
+        if os.name == "nt":
+            # Windows spellings: the Git Bash form of the path, and another
+            # case with backslashes. Elsewhere those name a different file.
+            msys = "/" + str(self.root)[0].lower() + str(self.root)[2:].replace("\\", "/") + "/server/auth.py"
+            spellings += [msys, "SERVER\\AUTH.PY"]
+        for p in spellings:
             with self.subTest(path=p):
                 self.assertIsNotNone(snapshot.synthesize(self.cas, "read_file", {"path": p}))
 

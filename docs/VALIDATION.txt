@@ -1,6 +1,6 @@
 hermes plugins validate . --install-deps   (SEC-1, block F)
 Run 2026-11-11 on native Windows 11, from the repo root, Python 3.14.7.
-Plugin code: the commit after 938a24b (Grok's block F recheck fix).
+Plugin code: the commit after e5b88fe (Grok's block F recheck fix).
 Block H reruns this on the frozen commit (SEC-10).
 Hermes Agent v0.23.1 (2026.9.24) · stable · local 3b4215785882
 

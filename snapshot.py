@@ -41,6 +41,8 @@ _SECRET_GLOBS = (
     "id_rsa*", "id_dsa*", "id_ecdsa*", "id_ed25519*",
     "credentials", "credentials.*", "*.env",
     "secrets.json", "secrets.yaml", "secrets.yml", "secrets.toml",
+    # Login stores (catalog rule 11 names Hermes's auth.json).
+    "auth.json", "token.json", "tokens.json",
 )
 
 _CONTENT_CLAMP = 500  # Hermes clamps match content to 500 characters
@@ -120,6 +122,13 @@ def capture(
     if not cassette.workspace:
         return [("*", "cassette has no workspace")]
     ws_key = normalize_path(cassette.workspace, cwd)
+    # The workspace's own path may run through a link (a Windows junction,
+    # macOS's /tmp). A file's real path is then compared with the workspace's
+    # real path too, or every file would look like a link leading out.
+    try:
+        real_ws_key = normalize_path(os.path.realpath(display_path(cassette.workspace, cwd)), cwd)
+    except Exception:
+        real_ws_key = ws_key
     used = sum(len(e.get("text", "").encode("utf-8")) for e in cassette.snapshot.values())
     for raw in raw_paths:
         try:
@@ -136,7 +145,7 @@ def capture(
                 continue
             disk = display_path(raw, cwd)
             real_key = normalize_path(os.path.realpath(disk), cwd)
-            if not is_within(real_key, ws_key):
+            if not (is_within(real_key, ws_key) or is_within(real_key, real_ws_key)):
                 notes.append((raw, "link points outside the workspace"))
                 continue
             st = os.stat(disk)
