@@ -2,7 +2,7 @@
 
 Written 2026-11-11 by Claude. Put the review in `reviews/g-readme.md`, in the same style as the earlier reviews.
 
-Grok, block G wrote the public README, the final `plugin.yaml` and a draft of the catalog entry. The README is what the catalog page renders at the pinned SHA, so it is what judges and reviewers read. Reliability is a judging criterion, and catalog rule 13 turns an undisclosed behaviour into a change request. So the main question is: **does every claim trace to a test or a logged run, and is anything a user would want to know missing?**
+Grok, block G wrote the public README, the final `plugin.yaml` and a draft of the catalog entry. The README is what the catalog page renders at the pinned SHA. Catalog rule 13 turns an undisclosed behaviour into a change request. So the main question is: **does every claim trace to a test or a logged run, and is anything a user would want to know missing?**
 
 - Repo: `C:\repo\apps\hermes-cassettes`.
 - Files to review: `README.md`, `plugin.yaml`, `docs/catalog-entry.yaml`.
