@@ -1,11 +1,10 @@
-hermes plugins validate . --install-deps   (SEC-1, block F)
-Run 2026-11-11 on native Windows 11, from the repo root, Python 3.14.7.
-Plugin code: the commit after e5b88fe (Grok's block F recheck fix).
-Block H reruns this on the frozen commit (SEC-10).
+hermes plugins validate <path> --install-deps   (SEC-1, rerun as SEC-10 in block H)
+Run 2026-11-11 on native Windows 11, Python 3.14.7, on a fresh clone of the frozen commit.
+Plugin code: commit fa1f9fc91d16e7a21f584ee6def42b3e68880a06, the commit docs/catalog-entry.yaml pins.
+<path> is that clone. Both runs exited 0.
 Hermes Agent v0.23.1 (2026.9.24) · stable · local 3b4215785882
 
-$ hermes plugins validate . --install-deps
-
+$ hermes plugins validate <path> --install-deps
 ✓ manifest — plugin.yaml parses
 ✓ manifest fields — name, version, description present
 ✓ requires_hermes — spec '>=0.23.1' parses
@@ -24,9 +23,8 @@ $ hermes plugins validate . --install-deps
 ◆ Isolation — runs in the plugin host (plugins.isolation: host)
 
 Validation passed.
-exit code: 0
 
-$ hermes plugins validate . --install-deps --json
+$ hermes plugins validate <path> --install-deps --json
 {
   "ok": true,
   "checks": [
@@ -119,4 +117,3 @@ $ hermes plugins validate . --install-deps --json
     ]
   }
 }
-exit code: 0

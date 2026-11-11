@@ -15,7 +15,7 @@ Results of the checks in `docs/PLAN.md` section 5a. Block F ran them on 2026-11-
 | SEC-7 | Fail closed in replay | unit tests, read of the code | **Pass** (block C). |
 | SEC-8 | Concurrency and atomic writes | unit tests | **Pass** (blocks B and C). |
 | SEC-9 | AI security review | Claude Code `/security-review` | **One real finding, fixed:** the replay child ran in an auto-approving mode. Two smaller items are fixed too. Details below. |
-| SEC-10 | Recheck the frozen commit | the SEC-1 to SEC-3 tools | **Pass before the freeze** (2026-11-11): the validator, bandit, semgrep and gitleaks are all clean on the code that goes into the freeze commit. Details under SEC-10 below. The same four run once more on the commit itself. |
+| SEC-10 | Recheck the frozen commit | the SEC-1 to SEC-3 tools | **Pass on the frozen commit** (2026-11-11): the validator, bandit, semgrep and gitleaks are all clean on a fresh clone of commit `fa1f9fc`, the one the catalog entry pins. Details under SEC-10 below. |
 
 Unit tests: `python -m unittest discover -s tests` runs **254 tests: 253 pass, 1 skipped** (the file-symlink escape test, which needs Developer Mode). Under Linux (Ubuntu 22.04 in WSL, Python 3.10, run in block H) that test runs and passes; 253 pass there as well, and the 1 skipped is the Windows launcher test. The 254 include the gateway-check tests, the fixes from Grok's review and recheck, the login-store skip test from Grok's README review, and the two link tests from the block H code read. *(Corrected 2026-11-11: this line used to say "251 pass, 1 skipped" when the suite had 251 tests, which was 250 passing and 1 skipped. The older "N pass, 1 skipped" figures in the Progress log likely have the same slip. They were not rechecked.)*
 
@@ -145,7 +145,18 @@ The code scanned is commit `0fc976c` plus the uncommitted changes that go into t
 
 **After those scans, before the freeze (same day).** Three things changed, none of them plugin code. `spikes/` was moved out of the repo, so bandit was rerun as `bandit -r . -x ./tests`: the same nine findings, 2,860 lines. Five unit tests that assert Windows path rules now run on Windows only, and the suite was run under Linux as well (254 run, 253 pass, 1 skipped on each system; `docs/TESTED.md`). Seven unpushed commits were rebuilt with one line of `docs/PLAN.md` reworded, and `gitleaks git` was rerun on the rebuilt history: 10 commits, no leaks. The validator still passes with no warnings, and `gitleaks dir` still finds nothing.
 
-**What is left for the commit itself.** These scans read the working tree, not a commit. Once the freeze commit exists, the same four run again on it, and `gitleaks git` then covers 11 commits. Nothing in the six modules changes between this rerun and the commit.
+**On the frozen commit itself.** The scans above read the working tree. After the freeze commit `fa1f9fc91d16e7a21f584ee6def42b3e68880a06` was made, the same checks ran once more on a fresh clone of it, checked out at that SHA, so nothing untracked could take part:
+
+| Check | Result on the clone |
+|---|---|
+| `hermes plugins validate <clone> --install-deps` | Exit 0, 15 checks, `warnings: []`. Output in `docs/VALIDATION.txt`. |
+| semgrep `p/python` | 0 findings, 151 rules, 6 files. |
+| `bandit -r . -x ./tests` | The same nine findings, 2,860 lines: 0 high, 1 medium in the demo fixture, 8 low. |
+| `gitleaks git` | 11 commits, about 610 KB, no leaks. |
+| `gitleaks dir` | About 828 KB, no leaks. |
+| Unit tests | 254 run, 253 pass, 1 skipped. |
+
+The catalog entry draft was also read by the catalog CI's field parser (`scripts/ci/catalog_entry_fields.py`, no rejection) and by Hermes's own entry loader (`hermes_cli/plugin_catalog.py`, `entry_from_mapping`), which accepts it. That is the entry file only. The catalog CI itself has not run, because nothing is pushed.
 
 **The code read found one bug, fixed: a workspace behind a link got no snapshot.** `snapshot.capture` refuses a file whose real path leaves the workspace. It compared the file's real path with the workspace path as given. If the workspace path itself runs through a link (a Windows junction, a symlinked folder, `/tmp` on macOS), every file's real path is outside it, so every file was skipped as "link points outside the workspace" and the cassette had no snapshot. That failed safe, with a warning in the cassette, but replays then had only exact hits to go on. The check now also accepts a real path under the workspace's own real path. Tests: `test_workspace_reached_through_a_link` (fails against the old code, and also checks that a link leading out of such a workspace is still refused) and `test_directory_link_escape` (an escape through a junction, which runs on Windows without Developer Mode; the file-symlink version is still skipped here). **Not reproduced live:** in two live recordings started from a junction, Hermes had already resolved the path before the plugin saw it (`docs/TESTED.md`). So on this machine the bug could be reached only in a unit test.
 
