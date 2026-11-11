@@ -179,6 +179,9 @@ The pinned commit moved to `2f52d48`. Its code is that of `3f06ba5`: comments sh
 | `hermes gateway restart`, then `hermes cassette run h-freeze-check --model gpt-oss:20b` | PASS 2/2, 2 calls: 0 hit, 2 synthesized, 0 miss. 13 s. Exit 0. |
 | The same again, after a second gateway restart | PASS 2/2, 2 calls: 0 hit, 2 synthesized, 0 miss. 9 s. Exit 0. |
 | Unit tests on a fresh clone of the pinned commit, after the history was rebuilt with a new author line (no code change) | 254 run, 253 pass, 1 skipped. |
+| Two more replays of `h-freeze-check` with gpt-oss:20b after the rebuild, same code and same gateway | One DIVERGED 2/2: 7 calls, 1 hit, 4 synthesized, 2 misses, both `terminal ls -R` commands that were refused and never ran. Exit 3. One PASS 2/2: 2 calls, both synthesized. Exit 0. |
+
+Five replays of this cassette with gpt-oss:20b were made on this code: four PASS and one DIVERGED. The DIVERGED run is the model choosing a tool call outside the recording, which the README lists under known issues.
 
 Not rerun on this code: a recording, the llama3.1:8b replay, and the README walkthrough from start to finish. The runs below were made on `fa1f9fc`.
 
