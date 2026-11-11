@@ -402,6 +402,16 @@ Newest entry at the bottom. Each entry gives the date, the block, what got done,
   - **Not rerun on the new commit:** a recording, the llama3.1:8b replay, the README walkthrough from start to finish. The cassettes recorded earlier are unchanged and the gateway runs the new code.
   - **Next:** unchanged. The owner's push, pull request, video and form.
 
+- **2026-11-11, the history rebuilt with the GitHub handle as author.**
+  - **Asked for by the owner before the push:** no key, personal name or email address in what gets published.
+  - **Found.** No key, token or password in any file or any commit: gitleaks, plus a pattern search of the whole history for key formats, credential assignments, unknown hashes, IP addresses and phone numbers. The author and committer lines of all 19 commits and of the tag carried a personal name and email address, and `LICENSE` carried the name. One sentence in `docs/SECURITY.md` spelled out a Windows user folder.
+  - **Done.** All 19 commits were re-created with the same messages and dates, with author and committer `eightyFJ` and GitHub's no-reply address. `LICENSE` names eightyFJ. In the docs the owner's first name now reads "the owner", and the user folder is described and not spelled out, in every commit. Every commit id changed, so the ids cited in the docs were remapped in the same pass. The six modules, `plugin.yaml`, the tests and the demo are byte for byte the same in every commit.
+  - **Pinned: `2f52d486367ea2a7a6ab5f4c67a59bd3902baa0d`**, the rebuilt form of the commit pinned before, and `v0.1.0` tags it. On a fresh clone at that commit: 254 unit tests with 253 passing and 1 skipped, the validator exits 0 with no warnings, semgrep has 0 findings, bandit has the same nine, gitleaks finds nothing in 19 commits or the tree. A search of all history, commit messages and author lines for the personal name, the email address and the user folder finds nothing.
+  - **No gateway restart was needed.** The files that make up the plugin's code version did not change on disk.
+  - **Kept outside the repo:** the earlier history as a git bundle and the old-to-new id list, in `C:\repo\_archive\session-cassettes-rebuild-2026-11-11`.
+  - **GitHub.** The repo there still holds the first commit in its earlier form. The owner deletes and recreates that repo before the push, and the rebuilt history then goes up as a plain push.
+  - **Next:** unchanged. The owner's push, pull request, video and form.
+
 ## 9. Decisions the owner needs to make
 
 1. Approve design decisions 1–8 above, or send back Grok's objections.

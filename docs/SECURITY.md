@@ -53,7 +53,7 @@ semgrep `p/python` over the six plugin modules (`tests`, `spikes` and `demo` exc
 - Rerun on 2026-11-11 after block G, with the README, the catalog draft and the snapshot fix still uncommitted: `gitleaks git .` over 10 commits (about 500 KB), no leaks. `gitleaks dir .` over the working tree (about 1.07 MB), no leaks. SEC-10 in block H runs both again on the frozen commit.
 - Rerun again on 2026-11-11 during the README audit, before the audit's doc edits: 10 commits, no leaks. Working tree (about 1.10 MB), no leaks.
 - By hand: `git grep` for the owner's email, the Windows user folder and its Git Bash and forward-slash forms finds nothing in tracked files. No cassette, run file, ledger or log is tracked. They all live under `%LOCALAPPDATA%\hermes\plugin-data\session-cassettes`, outside the repo. The demo fixture holds no real secrets, only a fake app.
-- **Not a leak, but the owner's call before the push:** `LICENSE` and the commit author carry the owner's name, and the commit metadata carries his email. `AGENTS.md` and `docs/PLAN.md` name the owner, Grok and Arete as the team (see PLAN section 7).
+- **Names and email.** The author and committer lines of every commit, the tag and `LICENSE` carry the GitHub handle, with GitHub's no-reply address in the commits. No personal name or email address is in any tracked file, commit message or author line. The history was rebuilt for this on 2026-11-11, before the push (`docs/PLAN.md`), and a search of the whole rebuilt history confirms it. `AGENTS.md` and `docs/PLAN.md` name Grok and Arete as part of the team (see PLAN section 7).
 
 ## SEC-9: AI security review
 
@@ -165,10 +165,13 @@ The catalog entry draft was also read by the catalog CI's field parser (`scripts
 | `hermes plugins validate <clone> --install-deps` | Exit 0, 15 checks, `warnings: []`. Output in `docs/VALIDATION.txt`. |
 | semgrep `p/python` | 0 findings, 151 rules, 6 files. |
 | `bandit -r . -x ./tests` | The same nine findings, 2,814 lines: 0 high, 1 medium in the demo fixture (`demo/fixture-repo/client/login.py:10`), 8 low (`__init__.py:272,340,345`, `arms.py:201,371`, `cli.py:33,227`, `verdict.py:25`). |
-| `gitleaks git` | 18 commits, about 660 KB, no leaks. |
+| `gitleaks git` | 19 commits, about 664 KB, no leaks. |
 | `gitleaks dir` | About 846 KB, no leaks. |
 | Unit tests | 254 run, 253 pass, 1 skipped, on Windows and under Linux in WSL. |
 | Catalog entry with the new SHA | Accepted by the catalog CI's field parser and by Hermes's entry loader. |
+| Search of all history, commit messages and author lines for a personal name, email address or user folder | Nothing found. |
+
+These results are from the rebuilt history. After the first run of this table the commits were re-created with the GitHub handle as author (`docs/PLAN.md`), which changed every commit id and no code file, and every check in the table was run again on a fresh clone of the rebuilt pinned commit. The commit ids in this file are the rebuilt ones.
 
 One live check was made on the working tree, whose six modules and `plugin.yaml` are the same in `3f06ba5` and `2f52d48`: after `hermes gateway restart`, `hermes cassette run h-freeze-check --model gpt-oss:20b` gave PASS 2/2 (`docs/TESTED.md`).
 

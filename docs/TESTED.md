@@ -178,6 +178,7 @@ The pinned commit moved to `2f52d48`. Its code is that of `3f06ba5`: comments sh
 | Unit tests, Ubuntu 22.04 in WSL, Python 3.10 | 254 run, 253 pass, 1 skipped. |
 | `hermes gateway restart`, then `hermes cassette run h-freeze-check --model gpt-oss:20b` | PASS 2/2, 2 calls: 0 hit, 2 synthesized, 0 miss. 13 s. Exit 0. |
 | The same again, after a second gateway restart | PASS 2/2, 2 calls: 0 hit, 2 synthesized, 0 miss. 9 s. Exit 0. |
+| Unit tests on a fresh clone of the pinned commit, after the history was rebuilt with a new author line (no code change) | 254 run, 253 pass, 1 skipped. |
 
 Not rerun on this code: a recording, the llama3.1:8b replay, and the README walkthrough from start to finish. The runs below were made on `fa1f9fc`.
 
