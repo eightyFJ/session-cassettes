@@ -1,6 +1,6 @@
 # Session Cassettes — a Hermes Agent plugin (hackathon entry)
 
-**Status on 2026-11-10:** the design is agreed. No plugin code exists yet.
+**Status on 2026-11-10:** blocks A to C of `docs/PLAN.md` are built: the store, the snapshot, the verdict, the arm files, and the hooks and middleware, with 190 unit tests. The `hermes cassette` CLI (block D) and the first live run (block E) are next. The Progress log at the end of `docs/PLAN.md` says what is done and what is not yet tested.
 
 ## What this is
 

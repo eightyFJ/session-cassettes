@@ -1,0 +1,14 @@
+name: session-cassettes
+version: "0.1.0"
+description: "Record a session's read-only tool results as a cassette, then replay the same request offline against another model, prompt or skill. During a replay the cassette answers every tool call, so no real tool runs. The verdict is whether the new answer still contains the facts you pinned."
+author: "eightyFJ"
+license: MIT
+homepage: https://github.com/eightyFJ/session-cassettes
+requires_hermes: ">=0.23.1"
+provides_tools: []
+provides_hooks:
+  - pre_llm_call
+  - post_llm_call
+provides_middleware:
+  - tool_execution
+requires_env: []
