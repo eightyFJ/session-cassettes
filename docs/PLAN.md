@@ -431,6 +431,13 @@ Newest entry at the bottom. Each entry gives the date, the block, what got done,
   - **First live run of a recording from an interactive session.** The README and the catalog entry at the pin still call that route untested.
   - **Next:** the owner's form.
 
+- **2026-11-11, form sent. Block I is done.**
+  - The owner sent the form at about 4:02 PM EST, with the repo, the pull request and the X post. The form answered "Submission Received".
+  - **Deadline wording.** The announcement and the 24-hour reminder name 5 PM EST (`docs/RULES.md`). The form's confirmation text names 1 PM PST, which is 4 PM EST, as the end of the hackathon. The form was open and accepted the entry.
+  - **All four parts of the entry exist:** the public repo, the pull request (NousResearch/hermes-agent#153854) pinned to `2f52d486367ea2a7a6ab5f4c67a59bd3902baa0d`, the video on X, and the form.
+  - **Still not run:** `hermes plugins install` from GitHub, and the catalog CI, which waits for a maintainer.
+  - **If a maintainer asks for a change to the plugin code:** the freeze is redone as described above, and the new SHA goes into the pull request as a new commit on its branch.
+
 ## 9. Decisions the owner needs to make
 
 1. Approve design decisions 1–8 above, or send back Grok's objections.
