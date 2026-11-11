@@ -370,6 +370,19 @@ Newest entry at the bottom. Each entry gives the date, the block, what got done,
   - **Next: block I, which is the owner's.** Push `main` and the tag, open the pull request with `docs/catalog-entry.yaml` as `plugin-catalog/session-cassettes.yaml`, record and post the video, send the form.
   - **The freeze, once the owner says go:** commit everything; rerun the validator, semgrep, bandit and gitleaks on that commit; refresh `docs/VALIDATION.txt`; write the 40-character SHA into `docs/catalog-entry.yaml`. The SHA can't sit in the commit it names, so the catalog draft, `docs/VALIDATION.txt` and the SEC-10 line for the commit go into a second, docs-only commit. The pinned SHA is the first one.
 
+- **2026-11-11, after the freeze: video preparation and handoff.**
+  - **State.** The pinned commit is `fa1f9fc91d16e7a21f584ee6def42b3e68880a06`, tagged `v0.1.0`. Every commit after it is docs only. **Nothing is pushed:** GitHub holds only the first commit, `3faab5c`.
+  - **Waiting on.** Grok's answer to `reviews/h-request.md`. The owner's word for the push and for the pull request (text in `docs/pr-description.md`, file content in `docs/catalog-entry.yaml`). The video, the X post and the form are the owner's.
+  - **Video.** The cassette `tinyshop` was recorded at 12:40 PM with arete:27b in `C:\repo\apps\tinyshop-demo` through `hermes chat -Q` (4 recorded calls, 6 snapshot files) and pinned with `auth.py` and `8080`. Each replay was run once: gpt-oss:20b PASS 2/2 (3 calls, all synthesized, 25 s), llama3.1:8b FAIL 0/2 with one refused `terminal` call (16 s). A rehearsal cassette recorded just before gave the same two results; it is in `C:\repo\_archive\session-cassettes-block-h-2026-11-11`. The step-by-step guide for the owner is `C:\repo\apps\Session-Cassettes-video-guide.docx`, outside the repo. It has the owner paste three commands: `hermes cassette show tinyshop`, then the two replays. The screen recorder steps in it were not tested.
+  - **Run live for the first time,** once each, through `chat -Q`: `/cassette record <name> --overwrite` on a name that did not exist (it armed as usual) and `/cassette stop` (it cancelled, and nothing was saved). The README at the pin still lists `/cassette stop` as never run live.
+  - **Still not run:** the interactive recording route, `--skill` through `chat -Q`, an install from GitHub, the catalog CI.
+  - **If a code change is needed** (for example from Grok's review), the freeze is redone:
+    1. Make the change, run the unit tests, commit.
+    2. If one of the six modules or `plugin.yaml` changed, run `hermes gateway restart` and one replay.
+    3. Clone that commit into a scratch folder. On the clone run the unit tests, `hermes plugins validate <clone> --install-deps` (plain and `--json`), semgrep `p/python` over the six modules, `bandit -r . -x ./tests`, `gitleaks git` and `gitleaks dir`.
+    4. Write the new SHA into `docs/catalog-entry.yaml` and `docs/pr-description.md`. Refresh `docs/VALIDATION.txt` and the SEC-10 section of `docs/SECURITY.md`. Move the `v0.1.0` tag. Commit those as docs only.
+  - **Next:** The owner's remaining items, in a fresh session.
+
 ## 9. Decisions the owner needs to make
 
 1. Approve design decisions 1–8 above, or send back Grok's objections.

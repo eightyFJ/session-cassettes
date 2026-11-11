@@ -168,6 +168,26 @@ What these runs show, and what they don't:
 - The file-symlink escape test, which Windows skips without Developer Mode, ran on Linux and passed. The 1 skipped on Linux is the launcher test.
 - **This is not a test of the plugin inside Hermes on Linux.** That distro has no Hermes, and its Python 3.10 is older than Hermes's minimum of 3.11.
 
+## Video preparation runs (2026-11-11, after the freeze)
+
+Run on the frozen code, commit `fa1f9fc`, from PowerShell in `C:\repo\apps\tinyshop-demo`. The request each time was "Where is the auth handler and what port does it bind?", with the pins `auth.py` and `8080`.
+
+| Cassette | Step | Result |
+|---|---|---|
+| `video-rehearsal` | Record, arete:27b, two `chat -Q` commands | Saved in 73 s: 4 recorded calls (3 `search_files`, 1 `read_file`), 6 snapshot files, correct answer. One warning: 1 named path left out of the snapshot (hidden path). |
+| `video-rehearsal` | Replay, gpt-oss:20b | PASS 2/2, 3 calls: 0 hit, 3 synthesized, 0 miss. 24 s. Exit 0. |
+| `video-rehearsal` | Replay, llama3.1:8b | FAIL 0/2, 1 call: 1 miss, `terminal cat /etc/nginx/nginx.conf` (refused, never ran). 19 s. Exit 1. |
+| `tinyshop` | Record, arete:27b, armed with `/cassette record tinyshop --overwrite` | Saved in 68 s: 4 recorded calls (2 `search_files`, 2 `read_file`), 6 snapshot files, correct answer. One warning: 5 named paths left out of the snapshot (hidden path). |
+| `tinyshop` | Replay, gpt-oss:20b | PASS 2/2, 3 calls: 0 hit, 3 synthesized, 0 miss. 25 s. Exit 0. |
+| `tinyshop` | Replay, llama3.1:8b | FAIL 0/2, 1 call: 1 miss, a `terminal docker inspect ...` command (refused, never ran). 16 s. Exit 1. |
+
+Also run once each through `chat -Q`, for the first time live:
+- `/cassette record <name> --overwrite` on a name that did not exist armed the session as usual.
+- `/cassette stop` in that session answered that the recording was cancelled and nothing was saved.
+- Pinning a fact a second time did not add a duplicate.
+
+The times are wall-clock for the whole command, model loading included. `tinyshop` stays in the plugin data folder for the video. `video-rehearsal` and its two run files were moved to `C:\repo\_archive\session-cassettes-block-h-2026-11-11`.
+
 **Argument passing through the real `hermes.exe` (SEC-4, live).** The SEC-4 unit test sends a hostile request to a Python child, not through Hermes's own launcher. One live check: Python's `subprocess` with an argument list and no shell started `hermes.exe chat -Q "--query=/cassette record <text>"`, where `<text>` held `"`, `'`, `%PATH%`, `&`, `|`, `;`, `^`, `$HOME` and a backtick. The plugin's handler in the gateway refused it as an invalid cassette name and echoed the text back unchanged, in 3 s. Nothing was armed. This was a slash command, not a model turn, and the text had no spaces or newlines.
 
 ## Memory prefetch (decision 9 disclosure)
