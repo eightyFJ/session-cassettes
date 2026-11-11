@@ -1,6 +1,6 @@
 # Session Cassettes — a Hermes Agent plugin (hackathon entry)
 
-**Status on 2026-11-10:** blocks A to D of `docs/PLAN.md` are built: the store, the snapshot, the verdict, the arm files, the hooks and middleware, and the `hermes cassette` CLI, with 234 unit tests. Nothing has run inside a live Hermes yet. Installing the plugin and the first live run (block E) are next. The Progress log at the end of `docs/PLAN.md` says what is done and what is not yet tested.
+**Status on 2026-11-10:** blocks A to F of `docs/PLAN.md` are done. The plugin is built, with 238 unit tests. It's installed and has run end to end in a live Hermes (`docs/TESTED.md`). The validator and security checks are in `docs/VALIDATION.txt` and `docs/SECURITY.md`. Block F changed the replay child from `hermes -z` (which auto-approves) to `hermes chat -Q`. Next is block G: the README and the catalog entry. The Progress log at the end of `docs/PLAN.md` says what is done and what is not yet tested.
 
 ## What this is
 

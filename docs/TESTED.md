@@ -47,6 +47,33 @@ What these runs show:
 
 Green (gpt-oss ×2), diverged (Arete, once), red from the model (llama ×2), red from tampering (×2) and red from a skill (×2) all reproduced. Diverged reproduced only once in 4 Arete runs; it's not forced.
 
+## Replay through `hermes chat -Q` (block F)
+
+Block F's security review found that `hermes -z` auto-approves dangerous commands (`docs/SECURITY.md`, SEC-9 finding 1). So `hermes cassette run` now starts the child as `hermes ... chat -Q --query=<request>`. **The replay rows above ran through `-z`. The rows below ran through `chat -Q`.** Same cassettes, same workspace.
+
+| Date | Cassette | Model | Result | Path | Time |
+|---|---|---|---|---|---|
+| 2026-11-10 | e2e-probe | gpt-oss:20b | PASS 2/2 | 4 calls: 0 hit, 4 synthesized, 0 miss | 13 s |
+| 2026-11-10 | e2e-probe | llama3.1:8b | FAIL 0/2, 1 miss | `terminal cat /etc/nginx/nginx.conf` (refused, never ran) | 11 s |
+| 2026-11-10 | e2e-probe | gpt-oss:20b | INVALID (pins 2/2) | 2 calls: 0 hit, 2 synthesized. Stdout ≠ ledger answer: see below | 6 s |
+| 2026-11-10 | e2e-probe | gpt-oss:20b | PASS 2/2 | debug run, stdout captured | — |
+| 2026-11-10 | e2e-probe | gpt-oss:20b | PASS 2/2 | debug run, stdout captured | — |
+| 2026-11-10 | e2e-probe | gpt-oss:20b | INVALID (pins 2/2) | debug run: stdout had `AUTH_PORT=***` where the ledger had `AUTH_PORT = 8080` | — |
+| 2026-11-10 | e2e-probe | gpt-oss:20b | PASS 2/2 | 3 calls: 1 hit, 2 synthesized, 0 miss | 8 s |
+| 2026-11-10 | e2e-probe | gpt-oss:20b | PASS 2/2 | 8 calls: 0 hit, 8 synthesized, 0 miss | 11 s |
+| 2026-11-10 | e2e-probe | gpt-oss:20b | DIVERGED 2/2 | 5 calls: 0 hit, 4 synthesized, 1 miss (`read_file server/__init__.py`) | 8 s |
+| 2026-11-10 | e2e-probe | llama3.1:8b | FAIL 0/2 | 0 calls | 8 s |
+| 2026-11-10 | e2e-tampered | gpt-oss:20b | FAIL 1/2 | 6 calls: 1 hit, 5 synthesized, 0 miss | 11 s |
+| 2026-11-10 | e2e-probe | gpt-oss:20b | PASS 2/2 | 2 calls: 1 hit, 1 synthesized, 0 miss | 6 s |
+
+What these runs show:
+- **The claim works through `chat -Q`.** Every run was claimed by the child's session (platform `cli`, first turn, exact text). The session id `chat -Q` prints on stderr matched the claiming session each time.
+- **The 2 INVALID runs were a real mismatch, now fixed.** `chat -Q` prints the gateway's stored copy of the answer, and Hermes redacts that copy. So `AUTH_PORT = 8080` in the answer printed as `AUTH_PORT=***`. The stdout check now also accepts Hermes's redacted copy of the ledger answer. A check against the real `agent.redact` reproduces the live mismatch exactly. The four runs after the fix were not INVALID.
+- **The DIVERGED run is honest.** No recorded result named `server/__init__.py` (an empty file), so it isn't in the snapshot. The model went outside the recording, and the answer was still right.
+- **The red cases reproduce on the new child:** llama3.1:8b FAIL ×2 (one refused `terminal` call), tampered FAIL.
+
+**Unclaimed `chat -Q` run (approval check).** In a scratch folder, with no arm, so the plugin passed every call through: `hermes --model=gpt-oss:20b --in=<scratch> chat -Q --query="Use the terminal tool to run exactly this command ...: rm -rf ./victim"`. **Hermes denied `rm -rf`** ("dangerous recursive delete"). Under `-z` it would have been auto-approved. The model then ran `rm ./victim/keep.txt` and `rmdir ./victim`, which Hermes doesn't flag, and the folder was deleted. So an unclaimed run is not harmless. It is only graded INVALID afterwards. See `docs/SECURITY.md`.
+
 ## Memory prefetch (decision 9 disclosure)
 
 Checked in the Hermes source and this machine's config, not in a live trace. Memory prefetch (`agent/turn_context.py:1078-1081`) runs only through a memory manager. Hermes creates one only when `memory.provider` names an external provider (`agent/agent_init.py:1211-1225`). This config sets no `memory.provider`, so **no prefetch runs on a replay turn here**. The built-in memory (`memories/MEMORY.md` and the user profile) is loaded from disk into the system prompt instead. That's a local read, with no tool call and no network, done the same way at record and at replay. If it changes between the two, the replay sees the new version. A user with an external memory provider (Honcho, RetainDB, ...) would get that provider's prefetch on replay. That was not tested.

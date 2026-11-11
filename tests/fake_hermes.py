@@ -1,4 +1,4 @@
-"""A stand-in for ``hermes --oneshot=...`` used by test_cli.py.
+"""A stand-in for ``hermes ... chat -Q --query=...`` used by test_cli.py.
 
 It runs in its own process, like the real child, and drives the plugin's real
 hooks and middleware the way the gateway would: ``pre_llm_call`` (which claims
@@ -11,7 +11,9 @@ The test's plan comes in the FAKE_HERMES_PLAN environment variable (JSON):
     calls      [[tool, args], ...] made during the turn
     answer     the final answer the hooks see
     stdout     what to print instead of the answer (default: the answer)
-    message    the first message the session sees (default: the --oneshot value)
+    message    the first message the session sees (default: the --query value)
+    session    the session id printed on stderr, as -Q does (default "S-child";
+               "" prints none)
     platform   default "cli"
     exit       exit code (default 0)
     sleep      seconds to sleep before answering
@@ -40,7 +42,7 @@ def main() -> int:
         if token.startswith("--") and "=" in token:
             key, _, value = token[2:].partition("=")
             opts.setdefault(key, value)
-    request = opts.get("oneshot", "")
+    request = opts.get("query", "")
     workdir = opts.get("in", os.getcwd())
     model = opts.get("model", "default-model")
     data = Path(plan["data_dir"])
@@ -68,6 +70,9 @@ def main() -> int:
     rt.post_llm_call(session_id="S-child", turn_id="T-child", assistant_response=answer, model=model)
     sys.stdout.write(plan.get("stdout", answer) + "\n")
     sys.stdout.flush()
+    session = plan.get("session", "S-child")
+    if session:
+        sys.stderr.write(f"\nsession_id: {session}\n")  # as hermes chat -Q does
     return int(plan.get("exit", 0))
 
 

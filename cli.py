@@ -10,8 +10,9 @@ This module runs in the user's terminal process, not in the gateway. ``run``
 meets the gateway's hooks through the arm and ledger files (arms.py):
 
 1. write ``armed/<id>.json`` with the recorded request (one run at a time);
-2. start ``hermes --oneshot=<request>`` as a child process with an argument
-   list, never a shell (SEC-4). The gateway session whose first message is that
+2. start ``hermes chat -Q --query=<request>`` as a child process with an
+   argument list, never a shell (SEC-4). Not ``hermes -z``: that mode
+   auto-approves dangerous commands, ``chat -Q`` denies them. The gateway session whose first message is that
    request claims the arm, and every tool call of its turn is answered from the
    cassette;
 3. read the ledger the hooks wrote, check that the claimed turn's final answer
@@ -141,7 +142,15 @@ def build_child_argv(
     """Arguments for the replay child. Every value is joined to its flag with
     ``=``, so no value can be read as a flag of its own: a request starting
     with ``-``, or containing ``-p`` (which Hermes scans for before argparse),
-    stays one unchanged argument."""
+    stays one unchanged argument.
+
+    The child is ``hermes chat -Q --query=<request>``, never ``hermes -z``. In
+    Hermes 0.23.1 ``-z`` runs its turn unattended and auto-approves dangerous
+    commands (``hermes_cli/gateway_chat.py:236``, ``tools/approval.py:388``).
+    ``chat -Q`` is a finite single query: a dangerous command with nobody to
+    approve it is denied (``approvals.single_query_mode``, default ``deny``).
+    So even a run whose claim failed, which runs tools live and is graded
+    INVALID, never gets an approval that nobody gave."""
     if not isinstance(request, str) or not request:
         raise CliError("the cassette has no request to replay")
     argv = list(hermes)
@@ -153,8 +162,24 @@ def build_child_argv(
         argv.append(f"--skills={skill}")
     if workdir:
         argv.append(f"--in={workdir}")
-    argv.append(f"--oneshot={request}")
+    argv += ["chat", "-Q", f"--query={request}"]
     return argv
+
+
+def replay_refusal(request: Any) -> str:
+    """Why a cassette's request can't be replayed safely, or "" if it can.
+    A cassette file is untrusted (SEC-6). A request Hermes rewrites before the
+    plugin sees it (an @ reference) or handles itself (a slash command) can
+    never match its arm, so the claim would fail and the turn would run live."""
+    if not isinstance(request, str) or not arms.normalize_request(request):
+        return "the cassette has no request to replay"
+    text = arms.normalize_request(request)
+    if text.startswith(("/", "!")):
+        return "the cassette's request starts with '/' or '!', which Hermes treats as a command"
+    from . import _record_refusal
+
+    why = _record_refusal(request)
+    return f"the cassette's request can't be replayed: {why}" if why else ""
 
 
 class ChildResult:
@@ -470,8 +495,34 @@ def _wait_for_ledger(base: Path, arm_id: str, wait: float, sleep: Callable[[floa
         sleep(_LEDGER_POLL_SECONDS)
 
 
-def _same_answer(ledger_answer: str, stdout: str) -> bool:
-    return arms.normalize_request(ledger_answer) == arms.normalize_request(stdout)
+_SESSION_LINE_RE = re.compile(r"^session_id:\s*(\S+)\s*$", re.MULTILINE)
+
+
+def _child_session_id(stderr: str) -> str:
+    """The session id ``hermes chat -Q`` prints on stderr, or "" if none."""
+    found = _SESSION_LINE_RE.findall(stderr or "")
+    return found[-1] if found else ""
+
+
+def _gateway_redact(text: str) -> str:
+    """What ``hermes chat -Q`` prints is the gateway's stored copy of the
+    answer, which Hermes redacts at that storage boundary
+    (``gateway/session_results.py``, ``redact_sensitive_text``). The hooks see
+    the answer before that, so ``AUTH_PORT = 8080`` in the ledger can print as
+    ``AUTH_PORT=***``. Returns the text unchanged if Hermes isn't importable."""
+    try:
+        from agent.redact import redact_sensitive_text
+
+        return redact_sensitive_text(text)
+    except Exception:
+        return text
+
+
+def _same_answer(ledger_answer: str, stdout: str, redact: Callable[[str], str] = _gateway_redact) -> bool:
+    printed = arms.normalize_request(stdout)
+    if arms.normalize_request(ledger_answer) == printed:
+        return True
+    return arms.normalize_request(redact(ledger_answer)) == printed
 
 
 def replay(
@@ -504,6 +555,9 @@ def replay(
             raise CliError(f"{name!r} has no recorded working directory; pass --in <folder>")
     if not Path(workdir).is_dir():
         raise CliError(f"the working directory \"{workdir}\" does not exist; pass --in <folder>")
+    refusal = replay_refusal(cassette.request)
+    if refusal:
+        raise CliError(refusal)
     hermes = list(hermes) if hermes else find_hermes()
     argv = build_child_argv(hermes, cassette.request, model=model, provider=provider,
                             skills=skills, workdir=workdir)
@@ -545,6 +599,10 @@ def replay(
                 if not child.timed_out and not _same_answer(ledger["final_answer"], child.stdout):
                     reasons.append("the claiming session's final answer is not what hermes printed, "
                                    "so the claim may belong to another session")
+            child_session = _child_session_id(child.stderr)
+            if child_session and ledger["session_id"] and child_session != ledger["session_id"]:
+                reasons.append(f"hermes ran session {child_session}, but session "
+                               f"{ledger['session_id']} claimed this run")
         v = verdict.compute_verdict(cassette.pins, answer, events, [c.key for c in cassette.calls], reasons)
         model_seen = ledger["model_seen"] if ledger is not None else ""
         if model and model_seen and model_seen != model and not model_seen.endswith(model):
@@ -632,7 +690,7 @@ def setup(parser: argparse.ArgumentParser) -> None:
     p.add_argument("--remove", action="store_true", help="remove this pin instead")
 
     p = sub.add_parser("run", help="replay the recorded request and print the verdict",
-                       description="Replay a cassette's request in a new 'hermes -z' session. Every "
+                       description="Replay a cassette's request in a new 'hermes chat -Q' session. Every "
                                    "tool call of that turn is answered from the cassette, so no tool "
                                    "runs. The verdict checks the answer against the pins.",
                        epilog=_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)

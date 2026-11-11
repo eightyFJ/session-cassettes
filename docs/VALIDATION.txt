@@ -1,0 +1,122 @@
+hermes plugins validate . --install-deps   (SEC-1, block F)
+Run 2026-11-10 on native Windows 11, from the repo root, Python 3.14.7.
+Plugin code: commit aad5ca0 plus the uncommitted block F changes (cli.py, __init__.py, tests).
+Block H reruns this on the frozen commit (SEC-10).
+Hermes Agent v0.23.1 (2026.9.24) · stable · local 3b4215785882
+
+$ hermes plugins validate . --install-deps
+
+✓ manifest — plugin.yaml parses
+✓ manifest fields — name, version, description present
+✓ requires_hermes — spec '>=0.23.1' parses
+✓ config schema — not declared
+✓ requires_env — all entries UPPER_SNAKE
+✓ oauth — not declared
+✓ loadable — entry: __init__.py
+✓ python dependencies — none declared
+✓ capability probe — register() ran in isolation
+✓ declared tools — matches registrations
+✓ declared hooks — matches registrations
+✓ declared middleware — matches registrations
+✓ built-in tool collisions — no tools to check
+✓ security scan — safe
+✓ no core override — no runtime rebinds of Hermes core
+◆ Isolation — runs in the plugin host (plugins.isolation: host)
+
+Validation passed.
+exit code: 0
+
+$ hermes plugins validate . --install-deps --json
+{
+  "ok": true,
+  "checks": [
+    {
+      "name": "manifest",
+      "ok": true,
+      "detail": "plugin.yaml parses"
+    },
+    {
+      "name": "manifest fields",
+      "ok": true,
+      "detail": "name, version, description present"
+    },
+    {
+      "name": "requires_hermes",
+      "ok": true,
+      "detail": "spec '>=0.23.1' parses"
+    },
+    {
+      "name": "config schema",
+      "ok": true,
+      "detail": "not declared"
+    },
+    {
+      "name": "requires_env",
+      "ok": true,
+      "detail": "all entries UPPER_SNAKE"
+    },
+    {
+      "name": "oauth",
+      "ok": true,
+      "detail": "not declared"
+    },
+    {
+      "name": "loadable",
+      "ok": true,
+      "detail": "entry: __init__.py"
+    },
+    {
+      "name": "python dependencies",
+      "ok": true,
+      "detail": "none declared"
+    },
+    {
+      "name": "capability probe",
+      "ok": true,
+      "detail": "register() ran in isolation"
+    },
+    {
+      "name": "declared tools",
+      "ok": true,
+      "detail": "matches registrations"
+    },
+    {
+      "name": "declared hooks",
+      "ok": true,
+      "detail": "matches registrations"
+    },
+    {
+      "name": "declared middleware",
+      "ok": true,
+      "detail": "matches registrations"
+    },
+    {
+      "name": "built-in tool collisions",
+      "ok": true,
+      "detail": "no tools to check"
+    },
+    {
+      "name": "security scan",
+      "ok": true,
+      "detail": "safe"
+    },
+    {
+      "name": "no core override",
+      "ok": true,
+      "detail": "no runtime rebinds of Hermes core"
+    }
+  ],
+  "warnings": [],
+  "isolation": {
+    "verdict": "host",
+    "host_ready": true,
+    "reasons": [],
+    "notes": [],
+    "ctx_methods": [
+      "register_command",
+      "register_hook",
+      "register_middleware"
+    ]
+  }
+}
+exit code: 0

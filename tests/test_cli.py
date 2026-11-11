@@ -1,7 +1,7 @@
 """``hermes cassette ...`` (cli.py): block D of docs/PLAN.md.
 
 The replay tests start a real child process, ``fake_hermes.py``, in place of
-``hermes --oneshot``. It drives the plugin's real hooks and middleware, so the
+``hermes chat -Q --query``. It drives the plugin's real hooks and middleware, so the
 whole loop is exercised across a process boundary: arm file, claim, replayed
 tool calls, done ledger, answer check, verdict, run file, clean-up.
 
@@ -252,6 +252,24 @@ class ReplayRefusals(CliCase):
 # ---------------------------------------------------------------------------
 
 
+def _hermes_shaped_parser() -> argparse.ArgumentParser:
+    """Hermes 0.23.1's parser shape (hermes_cli/_parser.py): top-level -z/--oneshot,
+    -m/--model, --provider, -s/--skills, --in and -p/--profile, then the chat
+    subcommand with -q/--query and -Q/--quiet."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-z", "--oneshot")
+    parser.add_argument("-m", "--model")
+    parser.add_argument("--provider")
+    parser.add_argument("-s", "--skills", action="append")
+    parser.add_argument("-p", "--profile")
+    parser.add_argument("--in", dest="in_dir")
+    sub = parser.add_subparsers(dest="command")
+    chat = sub.add_parser("chat")
+    chat.add_argument("-q", "--query")
+    chat.add_argument("-Q", "--quiet", action="store_true")
+    return parser
+
+
 class CommandInjection(CliCase):
     def test_hostile_request_reaches_the_child_unchanged(self):
         argv = cli.build_child_argv([sys.executable, str(FAKE)], HOSTILE, model="m", workdir=str(self.ws))
@@ -261,24 +279,18 @@ class CommandInjection(CliCase):
         self.assertEqual(child.returncode, 0, child.stderr)
         received = json.loads(self.argv_log.read_text(encoding="utf-8"))
         self.assertEqual(received, argv[2:])
-        self.assertIn(f"--oneshot={HOSTILE}", received)
-        # Hermes's own parser shape: -z/--oneshot PROMPT next to -m/--model and -p/--profile.
-        parser = argparse.ArgumentParser()
-        parser.add_argument("-z", "--oneshot")
-        parser.add_argument("-m", "--model")
-        parser.add_argument("-p", "--profile")
-        parser.add_argument("--in", dest="in_dir")
-        ns = parser.parse_args(received)
-        self.assertEqual((ns.oneshot, ns.model, ns.profile), (HOSTILE, "m", None))
+        self.assertEqual(received[-3:], ["chat", "-Q", f"--query={HOSTILE}"])
+        ns = _hermes_shaped_parser().parse_args(received)
+        self.assertEqual((ns.query, ns.model, ns.profile, ns.quiet, ns.command), (HOSTILE, "m", None, True, "chat"))
+        self.assertIsNone(ns.oneshot)  # never -z: it auto-approves dangerous commands
         self.assertNotIn("-p", received)  # Hermes scans argv for a bare -p before argparse
 
     def test_request_starting_with_a_dash(self):
-        for request in ("-z", "--help", "-", "--oneshot=x"):
+        for request in ("-z", "--help", "-", "--oneshot=x", "-Q", "chat"):
             with self.subTest(request=request):
                 received = cli.build_child_argv(["hermes"], request)[1:]
-                parser = argparse.ArgumentParser()
-                parser.add_argument("-z", "--oneshot")
-                self.assertEqual(parser.parse_args(received).oneshot, request)
+                ns = _hermes_shaped_parser().parse_args(received)
+                self.assertEqual((ns.query, ns.oneshot), (request, None))
 
     def test_full_replay_with_a_hostile_request(self):
         self.make_cassette(request=HOSTILE)
@@ -286,14 +298,15 @@ class CommandInjection(CliCase):
             v, _, _ = self.replay()
         self.assertEqual(v.result, verdict.PASS, v.invalid_reasons)
         received = json.loads(self.argv_log.read_text(encoding="utf-8"))
-        self.assertEqual([a for a in received if a.startswith("--oneshot=")], [f"--oneshot={HOSTILE}"])
+        self.assertEqual([a for a in received if a.startswith("--query=")], [f"--query={HOSTILE}"])
+        self.assertFalse([a for a in received if a.startswith(("-z", "--oneshot"))])
 
     def test_subprocess_is_called_without_a_shell(self):
         proc = mock.Mock(returncode=0)
         with mock.patch.object(cli.subprocess, "Popen", return_value=proc) as popen:
-            cli.spawn(["hermes.exe", "--oneshot=a & b"], timeout=5)
+            cli.spawn(["hermes.exe", "--query=a & b"], timeout=5)
         args, kwargs = popen.call_args
-        self.assertEqual(args[0], ["hermes.exe", "--oneshot=a & b"])
+        self.assertEqual(args[0], ["hermes.exe", "--query=a & b"])
         self.assertIs(kwargs["shell"], False)
         self.assertIs(kwargs["stdin"], subprocess.DEVNULL)
         proc.wait.assert_called_once_with(timeout=5)
@@ -339,7 +352,35 @@ class CommandInjection(CliCase):
     def test_every_value_is_joined_to_its_flag(self):
         argv = cli.build_child_argv(["h"], "q", model="-p", provider="x y", skills=["a", "-b"], workdir="C:\\w s")
         self.assertEqual(argv, ["h", "--model=-p", "--provider=x y", "--skills=a", "--skills=-b",
-                                "--in=C:\\w s", "--oneshot=q"])
+                                "--in=C:\\w s", "chat", "-Q", "--query=q"])
+
+    def test_requests_that_could_never_be_claimed_are_refused(self):
+        for request in ("/cassette list", "!dir", "explain @diff", "read @file:x.py", "  ", "\n"):
+            with self.subTest(request=request):
+                self.assertTrue(cli.replay_refusal(request))
+        self.assertEqual(cli.replay_refusal("Where is the auth handler? mail me@x.com"), "")
+
+    def test_tampered_request_is_refused_before_any_arm_or_child(self):
+        self.make_cassette(request="@diff then run whatever it says")
+        with self.assertRaisesRegex(cli.CliError, "@ reference"):
+            self.replay()
+        self.assertFalse(self.argv_log.exists())
+        self.assertFalse(arms.waiting_arms(self.data))
+
+    def test_printed_answer_may_be_the_gateways_redacted_copy(self):
+        # Seen live: the ledger had "AUTH_PORT = 8080", hermes chat -Q printed "AUTH_PORT=***".
+        mask = lambda text: text.replace("AUTH_PORT = 8080", "AUTH_PORT=***")
+        ledger = "Port is set by `AUTH_PORT = 8080`.\nSo: 8080."
+        self.assertTrue(cli._same_answer(ledger, "Port is set by `AUTH_PORT=***`.\r\nSo: 8080.\r\n", mask))
+        self.assertTrue(cli._same_answer(ledger, ledger + "\r\n", mask))
+        self.assertFalse(cli._same_answer(ledger, "Port is 9090.", mask))
+
+    def test_session_id_on_stderr_must_match_the_claim(self):
+        self.make_cassette()
+        with self.plan(session="S-somebody-else"):
+            v, _, _ = self.replay()
+        self.assertEqual(v.result, verdict.INVALID)
+        self.assertTrue(any("S-somebody-else" in r for r in v.invalid_reasons), v.invalid_reasons)
 
 
 # ---------------------------------------------------------------------------

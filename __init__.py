@@ -112,10 +112,20 @@ def _hermes_data_dir():
 
 def _hermes_redact(text: str, path: str) -> str:
     """Hermes's own redaction for file content shown to a model. The snapshot
-    reads files from disk, so it gets the same treatment a live read_file gets."""
+    reads files from disk, so it gets the same treatment a live read_file gets.
+
+    A live read_file also passes ``secret_file=True`` for the files Hermes
+    treats as secret-bearing (``tools/file_tools.py``). Those are ``.env``-style
+    and shell rc names, which the snapshot never captures (hidden paths), and a
+    ``config.yaml`` under the Hermes home. The helper that tells a Hermes-home
+    ``config.yaml`` apart is private, so every ``config.yaml`` (and the backup
+    copies Hermes writes of it) gets the stricter mode: a project's own
+    ``config.yaml`` may be over-redacted, never under-redacted."""
     from agent.redact import redact_sensitive_text
 
-    return redact_sensitive_text(text, file_read=True)
+    base = str(path).replace("\\", "/").rsplit("/", 1)[-1].lower()
+    secret_file = base == "config.yaml" or base.startswith(("config.yaml.good.", "config.yaml.corrupt."))
+    return redact_sensitive_text(text, file_read=True, secret_file=secret_file)
 
 
 def _hermes_session_key() -> str:
