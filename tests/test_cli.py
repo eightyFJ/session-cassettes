@@ -603,6 +603,27 @@ class Preflight(CliCase):
         self.assertNotEqual(before, arms.code_version(folder))
         self.assertRegex(arms.CODE_VERSION, r"^[0-9a-f]{16}$")
 
+    def test_a_gateway_in_yolo_mode_stops_the_run(self):
+        # Grok, block F recheck: tools/approval.py freezes the gateway's own
+        # HERMES_YOLO_MODE, and stripping it from the child can't undo that.
+        self.make_cassette()
+        with self.plan(ping="yolo"):
+            with self.assertRaisesRegex(cli.CliError, "HERMES_YOLO_MODE.*Nothing was replayed"):
+                self.replay()
+        self.assert_nothing_ran()
+
+    def test_the_ping_reports_the_gateways_yolo_mode(self):
+        rt = plugin.Runtime(data_dir=lambda: self.data, redact=lambda t, p: t, session_key=lambda: "")
+        cases = (("1", True), (" TRUE ", True), ("on", True), ("0", False), ("", False))
+        for i, (value, expected) in enumerate(cases):
+            with self.subTest(value=value):
+                nonce = f"{i:02x}" * 16
+                with mock.patch.dict(os.environ, {"HERMES_YOLO_MODE": value}):
+                    self.assertTrue(rt.command(f"ping {nonce}", session_id="S").startswith("pong"))
+                self.assertIs(arms.read_pong(self.data, nonce)["yolo"], expected)
+        self.assertFalse(arms.process_yolo({}))
+        self.assertTrue(arms.process_yolo({"HERMES_YOLO_MODE": "yes"}))
+
     def test_the_ping_happens_before_the_arm_exists(self):
         # Grok, block F: an arm waiting during the ping could be claimed by another session.
         self.make_cassette()
@@ -647,7 +668,9 @@ class Preflight(CliCase):
         nonce = "cd" * 16
         path = arms.pong_path(self.data, nonce)
         path.parent.mkdir(parents=True)
-        for junk in (b"", b"{", b'{"format": 1, "version": 5, "pid": 1}', b"\xff\xfe", b'[1]'):
+        for junk in (b"", b"{", b'{"format": 1, "version": 5, "pid": 1}', b"\xff\xfe", b'[1]',
+                     b'{"format": 1, "version": "v", "pid": 1}',
+                     b'{"format": 1, "version": "v", "pid": 1, "yolo": "no"}'):
             with self.subTest(junk=junk):
                 path.write_bytes(junk)
                 self.assertIsNone(arms.read_pong(self.data, nonce))

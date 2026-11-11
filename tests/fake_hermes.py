@@ -19,7 +19,8 @@ The test's plan comes in the FAKE_HERMES_PLAN environment variable (JSON):
     sleep      seconds to sleep before answering
     live_log   file to append to if a real tool (next_call) ever runs
     argv_log   file to write this process's argv to, as JSON (not for a ping)
-    ping       "ok" (default), "none" (no plugin: no pong) or "old" (other code)
+    ping       "ok" (default), "none" (no plugin: no pong), "old" (other code)
+               or "yolo" (a gateway started with HERMES_YOLO_MODE)
     ping_log   file to append each ping request to
 """
 
@@ -92,6 +93,11 @@ def ping(plan: dict, request: str) -> int:
         sys.stdout.write("Unknown command: /cassette\n")
         return 0
     data = Path(plan["data_dir"])
+    if mode == "yolo":  # a gateway started with HERMES_YOLO_MODE
+        nonce = request.split()[-1]
+        arms.write_pong(data, nonce, arms.CODE_VERSION, os.getpid(), time.time(), yolo=True)
+        sys.stdout.write("pong\n")
+        return 0
     if mode == "old":
         nonce = request.split()[-1]
         arms.write_pong(data, nonce, "0123456789abcdef", os.getpid(), time.time())

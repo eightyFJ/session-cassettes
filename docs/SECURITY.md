@@ -17,7 +17,7 @@ Results of the checks in `docs/PLAN.md` section 5a. Block F ran them on 2026-11-
 | SEC-9 | AI security review | Claude Code `/security-review` | **One real finding, fixed:** the replay child ran in an auto-approving mode. Two smaller items are fixed too. Details below. |
 | SEC-10 | Recheck the frozen commit | — | Block H. |
 
-Unit tests: `python -m unittest discover -s tests` gives **249 pass, 1 skipped** (the symlink test, which needs Developer Mode). That includes the gateway-check tests and the fixes from Grok's review, both added after block F.
+Unit tests: `python -m unittest discover -s tests` gives **251 pass, 1 skipped** (the symlink test, which needs Developer Mode). That includes the gateway-check tests and the fixes from Grok's review and recheck, all added after block F.
 
 The scanners were installed with the owner's OK. bandit and semgrep went into a throwaway venv in Claude's scratchpad, not the system Python. gitleaks came from scoop. semgrep installed and ran on native Windows, so SEC-2 did not fall back to bandit alone. semgrep downloaded the `p/python` rules from its registry and ran with `--metrics=off`.
 
@@ -92,6 +92,15 @@ All four new tests fail against the previous `cli.py`. Live after `hermes gatewa
 - **A forged pong.** Anyone who can write the plugin data folder can write a matching `pongs/<nonce>.json`. That's the same trust boundary as a tampered cassette: that writer could already edit Hermes's config.
 - The ping child's exit code is not checked. The pong file is the proof.
 - Under `plugins.isolation: host`, Grok did not trace whether the ping and `pre_llm_call` always run in the same interpreter. That mode is opt-in and untested.
+
+### Grok's recheck (`reviews/f-chat-q-recheck.md`), one more fix
+
+Grok confirmed all three fixes:
+- `HERMES_YOLO_MODE` is the only name in `_ENV_LAUNCH_FLAGS` that skips approvals. `client_env` never carries it. `HERMES_SAFE_MODE` and `HERMES_IGNORE_USER_CONFIG` reach the ping and the request alike, and don't unload the gateway's hooks for one session.
+- A compression inside the gateway doesn't move the printed `session_id:` onto another session. A rotation leaves the ledger not `done`, which is already INVALID.
+- A gateway restart or plugin disable after a good pong leaves the arm unclaimed, which is INVALID.
+
+**Found and fixed:** a gateway that was itself started with `HERMES_YOLO_MODE`. `tools/approval.py:48` freezes that into `_YOLO_MODE_FROZEN` when it is imported, and then approves flagged commands for every session the gateway hosts. Stripping the variable from the child can't undo that. The ping handler runs in the gateway, so the pong now reports `yolo`, read from the gateway's own environment with Hermes's truthy strings (`1`, `true`, `yes`, `on`). `cassette run` refuses a gateway in yolo mode with "Nothing was replayed". Tests: `test_a_gateway_in_yolo_mode_stops_the_run`, `test_the_ping_reports_the_gateways_yolo_mode`, and a pong without a boolean `yolo` counts as no pong. 251 tests pass. Live: after a normal gateway restart, a replay passed, so the real gateway's pong says `yolo: false`. **Not tested live:** a gateway really started with `HERMES_YOLO_MODE=1`. Doing that would auto-approve for every session on the machine while it ran, and Claude Code's permission check blocked it. The owner can run it if he wants it checked. The refusal doesn't cover a gateway that removed the variable from its environment after importing `tools.approval`.
 
 ### Item 2 (fixed): a cassette's request was not re-checked before a replay
 

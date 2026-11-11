@@ -538,6 +538,15 @@ def preflight(base: Path, hermes: Sequence[str], workdir: str, *,
     if pong["version"] != arms.CODE_VERSION:
         raise CliError(f"the Hermes gateway runs a different version of session-cassettes "
                        f"({pong['version']}) than this folder ({arms.CODE_VERSION}). {restart}")
+    if pong["yolo"]:
+        # tools/approval.py freezes the gateway's HERMES_YOLO_MODE at import:
+        # every session it hosts gets flagged commands approved. A replay is
+        # safe only while its claim holds; if the claim failed, the live turn
+        # would have them approved. The child's own environment can't undo it.
+        raise CliError("the Hermes gateway was started with HERMES_YOLO_MODE set, so it approves "
+                       "dangerous commands for every session, and a replay whose claim failed would "
+                       "run them. Restart the gateway from a shell without HERMES_YOLO_MODE "
+                       "('hermes gateway restart'), then try again. Nothing was replayed.")
     return pong
 
 

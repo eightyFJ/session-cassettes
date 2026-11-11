@@ -809,7 +809,8 @@ class Runtime:
         loaded, and says which code it loaded. Not listed in the usage text."""
         if len(words) != 1:
             return "cassette: ping takes one nonce"
-        arms.write_pong(self._data_dir(), words[0].lower(), arms.CODE_VERSION, os.getpid(), self._clock())
+        arms.write_pong(self._data_dir(), words[0].lower(), arms.CODE_VERSION, os.getpid(), self._clock(),
+                        yolo=arms.process_yolo())
         return f"pong {arms.CODE_VERSION}"
 
     def _cmd_record(self, words: list, sid: str, skey: str) -> str:

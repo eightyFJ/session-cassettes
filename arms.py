@@ -399,9 +399,22 @@ def pong_path(base_dir: os.PathLike | str, nonce: str) -> Path:
     return safe_join(base_dir, PONG_DIR, validate_arm_id(nonce) + ".json")
 
 
-def write_pong(base_dir: os.PathLike | str, nonce: str, version: str, pid: int, now: float) -> None:
+#: Hermes's truthy strings (``utils.TRUTHY_STRINGS``), as ``tools/approval.py``
+#: reads ``HERMES_YOLO_MODE`` into ``_YOLO_MODE_FROZEN`` when it is imported.
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def process_yolo(environ: Optional[dict] = None) -> bool:
+    """Whether this process runs with HERMES_YOLO_MODE, which makes Hermes
+    approve flagged commands for every session it hosts."""
+    env = os.environ if environ is None else environ
+    return str(env.get("HERMES_YOLO_MODE", "")).strip().lower() in _TRUTHY
+
+
+def write_pong(base_dir: os.PathLike | str, nonce: str, version: str, pid: int, now: float,
+               yolo: bool = False) -> None:
     atomic_write_json(pong_path(base_dir, nonce),
-                      {"format": FORMAT, "version": version, "pid": pid, "time": now})
+                      {"format": FORMAT, "version": version, "pid": pid, "time": now, "yolo": bool(yolo)})
 
 
 def read_pong(base_dir: os.PathLike | str, nonce: str) -> Optional[dict]:
@@ -412,10 +425,12 @@ def read_pong(base_dir: os.PathLike | str, nonce: str) -> Optional[dict]:
         return None
     if not isinstance(data, dict) or data.get("format") != FORMAT:
         return None
-    version, pid = data.get("version"), data.get("pid")
+    version, pid, yolo = data.get("version"), data.get("pid"), data.get("yolo")
     if not isinstance(version, str) or not isinstance(pid, int) or isinstance(pid, bool):
         return None
-    return {"version": version, "pid": pid}
+    if not isinstance(yolo, bool):
+        return None
+    return {"version": version, "pid": pid, "yolo": yolo}
 
 
 def discard_pong(base_dir: os.PathLike | str, nonce: str) -> None:
