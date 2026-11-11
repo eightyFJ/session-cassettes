@@ -384,6 +384,22 @@ Newest entry at the bottom. Each entry gives the date, the block, what got done,
     4. Write the new SHA into `docs/catalog-entry.yaml` and `docs/pr-description.md`. Refresh `docs/VALIDATION.txt` and the SEC-10 section of `docs/SECURITY.md`. Move the `v0.1.0` tag. Commit those as docs only.
   - **Next:** The owner's remaining items, in a fresh session.
 
+- **2026-11-11, the freeze redone after a comment cleanup.**
+  - **Asked for by the owner before the push:** cut the code comments down, and where a comment described a workaround, fix the code.
+  - **Comments.** References to this plan, to review rounds and to block letters are out of the six modules and the tests. Long rationale is cut to the rule it states. `docs/SECURITY.md` still holds the SEC list the test files name.
+  - **Code, no behaviour change.**
+    - The request check moved from `__init__.py` (`_record_refusal`) to `arms.request_refusal`. `cli.py` imported it from the package root inside a function; it now uses `arms` like everything else.
+    - `store.ReplayIndex` takes its synthesize function as an argument (`snapshot.synthesize` at the one call site). The import of `snapshot` inside `store.py` is gone.
+    - `store.py` imports `verdict` at module level. The comment gave an import-order reason that did not hold: `verdict.py` imports nothing from the package.
+    - `verdict.paint` is public, since `cli.py` calls it.
+    - The `~` branch in `store._normalise` is a condition, not an empty `pass`.
+    - The `# noqa: S603` on the child process call is gone. No tool in use reads it; bandit reports B603 either way, and `docs/SECURITY.md` explains it.
+  - **One note corrected.** `cli._gateway_redact` said it was not known where Hermes redacts the printed answer. It is: after a gap in its event stream, `hermes chat -Q` prints the answer from the settlement receipt (`hermes_cli/gateway_chat_view.py`, `_recover`), and that stored copy is redacted (`gateway/session_results.py`). The code was already right to accept either form.
+  - **Checked.** 254 unit tests, 253 pass and 1 skipped, on Windows and under Linux in WSL. `hermes gateway restart`, then one replay: `h-freeze-check` with gpt-oss:20b, PASS 2/2 in 13 s. On a fresh clone at the new commit: the validator exits 0 with no warnings, semgrep has 0 findings, bandit has the same nine, gitleaks finds nothing in 16 commits or the tree.
+  - **Pinned: `3f06ba568f2a0620a8a1d53bae87e80d2dcfe7c3`.** The tag `v0.1.0` moved to it. `docs/catalog-entry.yaml`, `docs/pr-description.md`, `docs/VALIDATION.txt` and the SEC-10 section of `docs/SECURITY.md` carry the new SHA, and the catalog CI's field parser and Hermes's entry loader accept the entry.
+  - **Not rerun on the new commit:** a recording, the llama3.1:8b replay, the README walkthrough from start to finish. The cassettes recorded earlier are unchanged and the gateway runs the new code.
+  - **Next:** unchanged. The owner's push, pull request, video and form.
+
 ## 9. Decisions the owner needs to make
 
 1. Approve design decisions 1–8 above, or send back Grok's objections.

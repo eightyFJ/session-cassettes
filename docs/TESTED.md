@@ -168,9 +168,21 @@ What these runs show, and what they don't:
 - The file-symlink escape test, which Windows skips without Developer Mode, ran on Linux and passed. The 1 skipped on Linux is the launcher test.
 - **This is not a test of the plugin inside Hermes on Linux.** That distro has no Hermes, and its Python 3.10 is older than Hermes's minimum of 3.11.
 
+## After the freeze was redone (2026-11-11)
+
+The pinned commit moved to `3f06ba5` (comments shortened, four changes with no change in behaviour; `docs/PLAN.md`). On that code:
+
+| Check | Result |
+|---|---|
+| Unit tests, Windows 11, Python 3.14.9 | 254 run, 253 pass, 1 skipped. |
+| Unit tests, Ubuntu 22.04 in WSL, Python 3.10 | 254 run, 253 pass, 1 skipped. |
+| `hermes gateway restart`, then `hermes cassette run h-freeze-check --model gpt-oss:20b` | PASS 2/2, 2 calls: 0 hit, 2 synthesized, 0 miss. 13 s. Exit 0. |
+
+Not rerun on `3f06ba5`: a recording, the llama3.1:8b replay, and the README walkthrough from start to finish. The runs below were made on `fa1f9fc`.
+
 ## Video preparation runs (2026-11-11, after the freeze)
 
-Run on the frozen code, commit `fa1f9fc`, from PowerShell in `C:\repo\apps\tinyshop-demo`. The request each time was "Where is the auth handler and what port does it bind?", with the pins `auth.py` and `8080`.
+Run on commit `fa1f9fc`, the pinned commit at the time, from PowerShell in `C:\repo\apps\tinyshop-demo`. The request each time was "Where is the auth handler and what port does it bind?", with the pins `auth.py` and `8080`.
 
 | Cassette | Step | Result |
 |---|---|---|

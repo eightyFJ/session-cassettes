@@ -1,6 +1,6 @@
 hermes plugins validate <path> --install-deps   (SEC-1, rerun as SEC-10 in block H)
 Run 2026-11-11 on native Windows 11, Python 3.14.7, on a fresh clone of the frozen commit.
-Plugin code: commit fa1f9fc91d16e7a21f584ee6def42b3e68880a06, the commit docs/catalog-entry.yaml pins.
+Plugin code: commit 3f06ba568f2a0620a8a1d53bae87e80d2dcfe7c3, the commit docs/catalog-entry.yaml pins.
 <path> is that clone. Both runs exited 0.
 Hermes Agent v0.23.1 (2026.9.24) · stable · local 3b4215785882
 
