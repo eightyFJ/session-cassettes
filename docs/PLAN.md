@@ -418,6 +418,12 @@ Newest entry at the bottom. Each entry gives the date, the block, what got done,
   - **Still not run:** `hermes plugins install` from GitHub, and the catalog CI.
   - **Next:** the owner's pull request, video and form.
 
+- **2026-11-11, pull request opened.**
+  - https://github.com/NousResearch/hermes-agent/pull/153854, opened by the owner from the fork `eightyFJ/hermes-agent`, branch `eightyFJ-patch-1`, against `main`.
+  - **Checked through the GitHub API:** one file added, `plugin-catalog/session-cassettes.yaml`, 29 lines, the same text as `docs/catalog-entry.yaml` below its comment lines, with the pinned SHA `2f52d486367ea2a7a6ab5f4c67a59bd3902baa0d`. The description is the text of `docs/pr-description.md`. The commit's author line is `eightyFJ` with the no-reply address.
+  - **Not yet run:** the catalog CI, which waits for a maintainer to start it.
+  - **Next:** the owner's video and form.
+
 ## 9. Decisions the owner needs to make
 
 1. Approve design decisions 1–8 above, or send back Grok's objections.
