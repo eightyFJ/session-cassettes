@@ -10,6 +10,9 @@ They meet through small JSON files in the plugin data folder:
                         hooks then rewrite it as the run's ledger: which
                         session and turn were bound, every tool call answered,
                         the final answer.
+    pongs/<nonce>.json  written by the gateway's ``/cassette ping <nonce>``
+                        before a run starts: proof that the gateway has this
+                        plugin loaded, and which code it loaded (CODE_VERSION).
 
 Claiming is the exclusive creation of ``claimed/<id>.json`` (``O_EXCL``), so
 exactly one caller can win (SEC-8). It is deliberately not a rename: on
@@ -23,6 +26,7 @@ Standard library only; nothing here imports Hermes. Every file is read through
 
 from __future__ import annotations
 
+import hashlib
 import math
 import os
 import re
@@ -56,6 +60,29 @@ MAX_REQUEST_CHARS = 200_000
 
 CLAIMED = "claimed"
 DONE = "done"
+PONG_DIR = "pongs"
+PONG_MAX_BYTES = 16 * 1024
+
+#: The plugin files whose bytes make up CODE_VERSION.
+_CODE_FILES = ("__init__.py", "arms.py", "cli.py", "snapshot.py", "store.py", "verdict.py", "plugin.yaml")
+
+
+def code_version(root: os.PathLike | str) -> str:
+    """A hash of the plugin's own files. Taken once, when the module loads, so
+    a gateway that loaded older code reports the older hash."""
+    h = hashlib.sha256()
+    for name in _CODE_FILES:
+        try:
+            data = (Path(root) / name).read_bytes()
+        except OSError:
+            data = b"<missing>"
+        h.update(name.encode() + b"\0" + str(len(data)).encode() + b"\0" + data)
+    return h.hexdigest()[:16]
+
+
+#: The code this process loaded. ``cassette run`` compares its own with the
+#: gateway's, so a gateway still running older code is caught before a run.
+CODE_VERSION = code_version(Path(__file__).resolve().parent)
 
 _ID_RE = re.compile(r"[0-9a-f]{32}")  # always used with fullmatch
 
@@ -361,3 +388,38 @@ def discard(base_dir: os.PathLike | str, arm_id: str) -> None:
             os.unlink(path_for(base_dir, arm_id))
         except (OSError, CassetteError):
             pass
+
+
+# ---------------------------------------------------------------------------
+# Pong: the gateway's answer to "/cassette ping <nonce>"
+# ---------------------------------------------------------------------------
+
+
+def pong_path(base_dir: os.PathLike | str, nonce: str) -> Path:
+    return safe_join(base_dir, PONG_DIR, validate_arm_id(nonce) + ".json")
+
+
+def write_pong(base_dir: os.PathLike | str, nonce: str, version: str, pid: int, now: float) -> None:
+    atomic_write_json(pong_path(base_dir, nonce),
+                      {"format": FORMAT, "version": version, "pid": pid, "time": now})
+
+
+def read_pong(base_dir: os.PathLike | str, nonce: str) -> Optional[dict]:
+    """The pong for ``nonce``, or None if there is none or it is malformed."""
+    try:
+        data = read_json_file(pong_path(base_dir, nonce), PONG_MAX_BYTES)
+    except (CassetteError, OSError):
+        return None
+    if not isinstance(data, dict) or data.get("format") != FORMAT:
+        return None
+    version, pid = data.get("version"), data.get("pid")
+    if not isinstance(version, str) or not isinstance(pid, int) or isinstance(pid, bool):
+        return None
+    return {"version": version, "pid": pid}
+
+
+def discard_pong(base_dir: os.PathLike | str, nonce: str) -> None:
+    try:
+        os.unlink(pong_path(base_dir, nonce))
+    except (OSError, CassetteError):
+        pass

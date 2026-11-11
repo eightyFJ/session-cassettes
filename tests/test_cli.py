@@ -529,6 +529,90 @@ class Commands(CliCase):
         self.assertIs(seen["handler"], cli.handle)
 
 
+class Preflight(CliCase):
+    """Before a run, the gateway must answer /cassette ping with this code's version."""
+
+    def setUp(self):
+        super().setUp()
+        self.ping_log = self.root / "ping.log"
+
+    def assert_nothing_ran(self):
+        self.assertFalse(self.argv_log.exists())  # the request child never started
+        self.assertFalse(self.live_log.exists())
+        self.assertEqual(arms.waiting_arms(self.data), [])
+        self.assertFalse((self.data / "runs").exists())
+        self.assertEqual(list((self.data / arms.PONG_DIR).glob("*")) if (self.data / arms.PONG_DIR).exists() else [], [])
+
+    def test_a_gateway_without_the_plugin_stops_the_run_before_the_request(self):
+        self.make_cassette()
+        with self.plan(ping="none", ping_log=str(self.ping_log)):
+            with self.assertRaisesRegex(cli.CliError, "did not answer.*gateway restart.*Nothing was replayed"):
+                self.replay()
+        self.assertEqual(len(self.ping_log.read_text(encoding="utf-8").splitlines()), 1)
+        self.assert_nothing_ran()
+
+    def test_a_gateway_running_other_code_stops_the_run(self):
+        self.make_cassette()
+        with self.plan(ping="old"):
+            with self.assertRaisesRegex(cli.CliError, "different version.*0123456789abcdef"):
+                self.replay()
+        self.assert_nothing_ran()
+
+    def test_the_ping_goes_first_and_leaves_no_file(self):
+        self.make_cassette()
+        with self.plan(ping_log=str(self.ping_log)):
+            v, _, _ = self.replay()
+        self.assertEqual(v.result, verdict.PASS, v.invalid_reasons)
+        pings = self.ping_log.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(pings), 1)
+        self.assertRegex(pings[0], r"^/cassette ping [0-9a-f]{32}$")
+        self.assertEqual(list((self.data / arms.PONG_DIR).glob("*")), [])
+
+    def test_ping_argv(self):
+        seen = []
+
+        def fake_run(argv, timeout, cwd=None):
+            seen.append(argv)
+            arms.write_pong(self.data, argv[-1].split()[-1], arms.CODE_VERSION, 1, time.time())
+            return cli.ChildResult(0, "pong", "", False, 0.1)
+
+        cli.preflight(self.data, ["hermes.exe"], str(self.ws), run_child=fake_run)
+        argv = seen[0]
+        self.assertEqual(argv[:2], ["hermes.exe", f"--in={self.ws}"])
+        self.assertEqual(argv[2:4], ["chat", "-Q"])  # never -z
+        self.assertRegex(argv[4], r"^--query=/cassette ping [0-9a-f]{32}$")
+        self.assertFalse([a for a in argv if a.startswith("--model")])  # a slash command: no model call
+
+    def test_the_plugin_answers_a_ping_with_its_code_version(self):
+        rt = plugin.Runtime(data_dir=lambda: self.data, redact=lambda t, p: t, session_key=lambda: "")
+        nonce = "ab" * 16
+        self.assertEqual(rt.command(f"ping {nonce}", session_id="S"), f"pong {arms.CODE_VERSION}")
+        self.assertEqual(arms.read_pong(self.data, nonce)["version"], arms.CODE_VERSION)
+        for bad in ("ping ../x", "ping", "ping a b", "ping CON"):
+            with self.subTest(bad=bad):
+                self.assertTrue(rt.command(bad, session_id="S").startswith("cassette:"))
+        self.assertEqual(sorted(p.name for p in (self.data / arms.PONG_DIR).iterdir()), [nonce + ".json"])
+
+    def test_code_version_follows_the_files(self):
+        folder = self.root / "plugin"
+        folder.mkdir()
+        (folder / "store.py").write_text("x = 1\n", encoding="utf-8")
+        before = arms.code_version(folder)
+        self.assertEqual(before, arms.code_version(folder))
+        (folder / "store.py").write_text("x = 2\n", encoding="utf-8")
+        self.assertNotEqual(before, arms.code_version(folder))
+        self.assertRegex(arms.CODE_VERSION, r"^[0-9a-f]{16}$")
+
+    def test_a_malformed_pong_counts_as_no_pong(self):
+        nonce = "cd" * 16
+        path = arms.pong_path(self.data, nonce)
+        path.parent.mkdir(parents=True)
+        for junk in (b"", b"{", b'{"format": 1, "version": 5, "pid": 1}', b"\xff\xfe", b'[1]'):
+            with self.subTest(junk=junk):
+                path.write_bytes(junk)
+                self.assertIsNone(arms.read_pong(self.data, nonce))
+
+
 class RunHistory(CliCase):
     def test_load_runs_skips_junk_and_sorts_newest_first(self):
         for i, result in enumerate(["FAIL", "PASS"]):

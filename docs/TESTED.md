@@ -74,6 +74,27 @@ What these runs show:
 
 **Unclaimed `chat -Q` run (approval check).** In a scratch folder, with no arm, so the plugin passed every call through: `hermes --model=gpt-oss:20b --in=<scratch> chat -Q --query="Use the terminal tool to run exactly this command ...: rm -rf ./victim"`. **Hermes denied `rm -rf`** ("dangerous recursive delete"). Under `-z` it would have been auto-approved. The model then ran `rm ./victim/keep.txt` and `rmdir ./victim`, which Hermes doesn't flag, and the folder was deleted. So an unclaimed run is not harmless. It is only graded INVALID afterwards. See `docs/SECURITY.md`.
 
+## Record through `hermes chat -Q` (block F follow-up)
+
+| Date | Model | How | Result |
+|---|---|---|---|
+| 2026-11-10 | arete:27b | `hermes chat -Q "--query=/cassette record f-record-q"` in the demo folder, then `hermes chat -Q --resume=<the session_id it printed on stderr> "--query=<request>"` | Saved in 79 s: 4 recorded calls, correct answer. |
+
+This is the headless record route that doesn't auto-approve (`-z` does). It also shows that a slash command sent through `chat -Q` runs in the gateway: the record request lives only in the gateway's memory, and a separate process's turn picked it up. Run from PowerShell; Git Bash rewrites the `/` even inside `--query=/...`.
+
+Side finding: the wrong-map demo skill `tinyshop-layout` was still installed. Arete read it during this ordinary recording and called it out as wrong. Install it only for the wrong-skill red run.
+
+## Gateway check before a run (block F follow-up)
+
+`hermes cassette run` now sends `/cassette ping <nonce>` before the request (`docs/SECURITY.md`).
+
+| Date | State | Result |
+|---|---|---|
+| 2026-11-10 | Gateway still on the block F commit (no `ping` verb) | Refused in 5 s: "the Hermes gateway did not answer ... Nothing was replayed." Exit 2, no arm or pong left. |
+| 2026-11-10 | After `hermes gateway restart` | gpt-oss:20b PASS 2/2, 5 calls: 0 hit, 5 synthesized, 0 miss. 27 s in all, about 5 s of it the ping. |
+| 2026-11-10 | `verdict.py` changed after the gateway loaded | Refused: "runs a different version ... (1b73c1a286de85c0) than this folder (6059834b4122c5dc)". Exit 2. File restored. |
+| 2026-11-10 | `hermes plugins disable session-cassettes` + gateway restart | `hermes cassette` is not a command, so nothing can run. Re-enabled and restarted afterwards: PASS. |
+
 ## Memory prefetch (decision 9 disclosure)
 
 Checked in the Hermes source and this machine's config, not in a live trace. Memory prefetch (`agent/turn_context.py:1078-1081`) runs only through a memory manager. Hermes creates one only when `memory.provider` names an external provider (`agent/agent_init.py:1211-1225`). This config sets no `memory.provider`, so **no prefetch runs on a replay turn here**. The built-in memory (`memories/MEMORY.md` and the user profile) is loaded from disk into the system prompt instead. That's a local read, with no tool call and no network, done the same way at record and at replay. If it changes between the two, the replay sees the new version. A user with an external memory provider (Honcho, RetainDB, ...) would get that provider's prefetch on replay. That was not tested.

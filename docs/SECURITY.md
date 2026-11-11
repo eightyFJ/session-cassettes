@@ -17,7 +17,7 @@ Results of the checks in `docs/PLAN.md` section 5a. Block F ran them on 2026-11-
 | SEC-9 | AI security review | Claude Code `/security-review` | **One real finding, fixed:** the replay child ran in an auto-approving mode. Two smaller items are fixed too. Details below. |
 | SEC-10 | Recheck the frozen commit | — | Block H. |
 
-Unit tests: `python -m unittest discover -s tests` gives **238 pass, 1 skipped** (the symlink test, which needs Developer Mode).
+Unit tests: `python -m unittest discover -s tests` gives **245 pass, 1 skipped** (the symlink test, which needs Developer Mode). That includes the gateway-check tests added after block F.
 
 The scanners were installed with the owner's OK. bandit and semgrep went into a throwaway venv in Claude's scratchpad, not the system Python. gitleaks came from scoop. semgrep installed and ran on native Windows, so SEC-2 did not fall back to bandit alone. semgrep downloaded the `p/python` rules from its registry and ran with `--metrics=off`.
 
@@ -69,7 +69,13 @@ Claude Code's `/security-review` ran over the whole plugin. The diff was taken a
 
 **What the fix does not cover, said plainly.** In that same unclaimed run, the model worked around the denial with `rm ./victim/keep.txt` and `rmdir ./victim`. Hermes doesn't flag those, so they ran, and the folder was deleted. So `chat -Q` stops automatic approval of flagged commands. It does **not** make an unclaimed run harmless: any tool Hermes doesn't gate still runs live. The run is then graded INVALID ("no session claimed this run ... may have run with live tools"), but only after the child exits. The README must say this: a replay is offline only when its run is not INVALID.
 
-**Open, for the owner and block H:** check before starting the child that the gateway has the plugin's hooks loaded. That would turn the most likely claim failure into a refusal before anything runs. It isn't built: the CLI process loads the plugin too, so a simple "loaded" marker can't tell the gateway from the CLI. It needs a small design.
+**Follow-up, built the same night: a gateway check before the run.** After writing the arm and before sending the request, `cassette run` sends `/cassette ping <nonce>` through `hermes chat -Q` (`cli.preflight`). That makes no model call. Hermes hands the slash command to the plugin's handler in the gateway, and the handler writes `pongs/<nonce>.json` with `arms.CODE_VERSION`, a hash of the plugin files taken when the module loaded. The run goes ahead only if the pong arrives and its version equals the CLI's own. Otherwise the CLI stops with "Nothing was replayed", and the arm and the pong are removed. This turns the most likely claim failures into refusals before anything runs: a gateway that hasn't loaded the plugin, or one still running older code.
+
+How we know the slash command runs in the gateway, not the CLI process: a recording started with `chat -Q --query="/cassette record f-record-q"` was saved by the next, separate `chat -Q --resume` process. The record request lives only in the gateway's memory.
+
+Tested live: the gateway still on the block F commit, with no `ping` verb, was refused in 5 s. After `hermes gateway restart` the run passed. One plugin file changed after the gateway loaded was refused, with both versions shown. With the plugin disabled, `hermes cassette` doesn't exist. Unit tests: no pong, an old version, a malformed pong, the ping's argv (`chat -Q`, no `--model`), and the pong file removed.
+
+What it doesn't cover: (a) a hot reload that registers the new command but leaves older hooks wired; Hermes's own note says hooks change only on a gateway restart. (b) Another session with the identical first message winning the claim during the run, which the stderr session-id check reports afterwards. (c) A `pre_llm_call` that times out. All three are rare and are graded INVALID.
 
 ### Item 2 (fixed): a cassette's request was not re-checked before a replay
 
@@ -95,7 +101,7 @@ Checked against the real `agent.redact`: for a Hermes-home `config.yaml`, the pl
 
 ## Known residual risks (for the README)
 
-- **An unclaimed run runs live** (see Finding 1). Flagged commands are denied, everything else runs, and the run is INVALID.
+- **An unclaimed run runs live** (see Finding 1). The gateway check stops the common causes before the request is sent. In the rare cases left, flagged commands are denied, everything else runs, and the run is INVALID.
 - The residuals of block C, written up in `reviews/c-middleware.md` and `reviews/c-middleware-recheck.md` and in PLAN's Progress log, items (a) to (f). For example, a `BaseException` in a narrow window, and caps of 10,000 retired turns.
 - Memory prefetch with an external memory provider is untested (`docs/TESTED.md`).
 - The snapshot search uses Python `re`, so a pathological pattern from the model could make a replayed call slow. That's denial of service only, and out of scope here.

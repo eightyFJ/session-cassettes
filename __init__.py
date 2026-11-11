@@ -780,6 +780,8 @@ class Runtime:
             return self._cmd_status(sid, skey)
         if verb == "pin":
             return self._cmd_pin(raw)
+        if verb == "ping":
+            return self._cmd_ping(words[1:])
         if verb == "list":
             names = store.CassetteStore(self._data_dir()).names()
             return "cassettes: " + ", ".join(names) if names else "no cassettes yet. /cassette record <name> starts one."
@@ -800,6 +802,15 @@ class Runtime:
                 if key and key in self._pending:
                     return self._pending[key]
         return None
+
+    def _cmd_ping(self, words: list) -> str:
+        """``hermes cassette run`` sends ``/cassette ping <nonce>`` before it arms
+        a run. Writing the pong proves this process (the gateway) has the plugin
+        loaded, and says which code it loaded. Not listed in the usage text."""
+        if len(words) != 1:
+            return "cassette: ping takes one nonce"
+        arms.write_pong(self._data_dir(), words[0].lower(), arms.CODE_VERSION, os.getpid(), self._clock())
+        return f"pong {arms.CODE_VERSION}"
 
     def _cmd_record(self, words: list, sid: str, skey: str) -> str:
         flags = [w for w in words if w.startswith("--")]

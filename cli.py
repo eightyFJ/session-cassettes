@@ -59,6 +59,7 @@ _EXIT_FOR = {
 }
 
 DEFAULT_TIMEOUT_SECONDS = 900.0
+PING_TIMEOUT_SECONDS = 120.0
 #: After the child exits, how long to wait for the hooks' ``done`` ledger.
 LEDGER_WAIT_SECONDS = 20.0
 _LEDGER_POLL_SECONDS = 0.1
@@ -495,6 +496,39 @@ def _wait_for_ledger(base: Path, arm_id: str, wait: float, sleep: Callable[[floa
         sleep(_LEDGER_POLL_SECONDS)
 
 
+def preflight(base: Path, hermes: Sequence[str], workdir: str, *,
+              run_child: Callable[..., ChildResult] = None, timeout: float = 120.0) -> dict:
+    """Check, before the request is sent, that the gateway that will run it has
+    this plugin loaded, with the same code as this folder.
+
+    It sends ``/cassette ping <nonce>`` through ``hermes chat -Q``. Hermes hands
+    a slash command to the plugin's handler in the gateway, with no model call,
+    and the handler writes ``pongs/<nonce>.json`` with the gateway's
+    CODE_VERSION. No pong means the gateway has not loaded the plugin, so the
+    hooks could not claim the run and its tools would run live. A different
+    version means the gateway still runs older code. Either way nothing is
+    replayed. Raises CliError; returns the pong."""
+    run_child = run_child or spawn
+    nonce = uuid.uuid4().hex
+    argv = list(hermes) + ([f"--in={workdir}"] if workdir else []) + [
+        "chat", "-Q", f"--query=/cassette ping {nonce}"]
+    restart = ("Run 'hermes gateway restart' (and check 'hermes plugins list' shows "
+               "session-cassettes enabled), then try again. Nothing was replayed.")
+    try:
+        child = run_child(argv, timeout=timeout, cwd=workdir or None)
+        pong = arms.read_pong(base, nonce)
+    finally:
+        arms.discard_pong(base, nonce)
+    if pong is None:
+        why = "it timed out" if child.timed_out else "no answer came back"
+        raise CliError(f"the Hermes gateway did not answer for session-cassettes ({why}), so it "
+                       f"may not have the plugin loaded and a replay could run tools live. {restart}")
+    if pong["version"] != arms.CODE_VERSION:
+        raise CliError(f"the Hermes gateway runs a different version of session-cassettes "
+                       f"({pong['version']}) than this folder ({arms.CODE_VERSION}). {restart}")
+    return pong
+
+
 _SESSION_LINE_RE = re.compile(r"^session_id:\s*(\S+)\s*$", re.MULTILINE)
 
 
@@ -563,11 +597,12 @@ def replay(
                             skills=skills, workdir=workdir)
 
     arm = arms.create_arm(base, name, cassette.request, model=model)
-    started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    log(f"replaying {name!r} with {model or 'the default model'} in {workdir}")
-    log("every tool call of the replayed turn is answered from the cassette; no tool runs. "
-        f"waiting for hermes (timeout {int(timeout)}s)...")
     try:
+        preflight(base, hermes, workdir, run_child=run_child, timeout=min(timeout, PING_TIMEOUT_SECONDS))
+        started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        log(f"replaying {name!r} with {model or 'the default model'} in {workdir}")
+        log("every tool call of the replayed turn is answered from the cassette; no tool runs. "
+            f"waiting for hermes (timeout {int(timeout)}s)...")
         child = run_child(argv, timeout=timeout, cwd=workdir)
         reasons: list = []
         if child.timed_out:
