@@ -424,6 +424,13 @@ Newest entry at the bottom. Each entry gives the date, the block, what got done,
   - **Not yet run:** the catalog CI, which waits for a maintainer to start it.
   - **Next:** the owner's video and form.
 
+- **2026-11-11, video posted.**
+  - https://x.com/xEllisWyattx/status/2120622288395522432, posted by the owner. X's public embed data shows the post is public and mentions @NousResearch.
+  - **The take.** One screen recording, 85 seconds, not sped up. It follows version 3 of the video guide: inside an interactive `hermes` session in `C:\repo\apps\tinyshop-demo`, `/cassette record demo --overwrite`, the request, `/cassette status`, `/quit`; then two pins and two replays from PowerShell. Results are in `docs/TESTED.md`.
+  - **One edit.** In the three lines that print a path under the Windows user folder, the folder name is blanked in every frame. Nothing else in the recording was changed. The edit was made with ffmpeg, installed through scoop with the owner's OK.
+  - **First live run of a recording from an interactive session.** The README and the catalog entry at the pin still call that route untested.
+  - **Next:** the owner's form.
+
 ## 9. Decisions the owner needs to make
 
 1. Approve design decisions 1–8 above, or send back Grok's objections.

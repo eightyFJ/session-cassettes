@@ -185,6 +185,19 @@ Five replays of this cassette with gpt-oss:20b were made on this code: four PASS
 
 Not rerun on this code: a recording, the llama3.1:8b replay, and the README walkthrough from start to finish. The runs below were made on `fa1f9fc`.
 
+## The video take (2026-11-11, on the pinned code)
+
+Recorded at 3:23 PM from PowerShell in `C:\repo\apps\tinyshop-demo`. This is the first live run of a recording made from inside an interactive `hermes` session. The README and the catalog entry at the pin still list that route as untested.
+
+| Step | Result |
+|---|---|
+| `hermes`, then `/cassette record demo --overwrite` | Armed. The reply named the cassette file. |
+| The request, answered by arete:27b | Correct answer in 20 s: `server/auth.py`, port 8080. |
+| `/cassette status` | Saved: 4 tool calls recorded, 6 files in the snapshot. One warning: 1 named path left out of the snapshot (hidden path). |
+| `hermes cassette pin demo auth.py`, then `8080` | Two pins. |
+| `hermes cassette run demo --model gpt-oss:20b` | PASS 2/2, 2 calls: 0 hit, 2 synthesized, 0 miss. 13 s. |
+| `hermes cassette run demo --model llama3.1:8b` | FAIL 0/2, 1 call: 1 miss, a `manage_connections` call that was refused and never ran. 10 s. |
+
 ## Video preparation runs (2026-11-11, after the freeze)
 
 Run on commit `fa1f9fc`, the pinned commit at the time, from PowerShell in `C:\repo\apps\tinyshop-demo`. The request each time was "Where is the auth handler and what port does it bind?", with the pins `auth.py` and `8080`.
