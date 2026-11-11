@@ -13,7 +13,7 @@ Session Cassettes records the read-only tool results of one Hermes session and l
 ## The entry
 
 - Repo: https://github.com/eightyFJ/session-cassettes
-- Pin: `3f06ba568f2a0620a8a1d53bae87e80d2dcfe7c3` (tag `v0.1.0`)
+- Pin: `2f52d486367ea2a7a6ab5f4c67a59bd3902baa0d` (tag `v0.1.0`)
 - Tier `community`, category `tools`, plugin at the repo root
 - Capabilities: hooks `pre_llm_call` and `post_llm_call`, middleware `tool_execution`, no tools, no environment variables
 - It also registers the `/cassette` slash command and the `hermes cassette` CLI command

@@ -170,15 +170,16 @@ What these runs show, and what they don't:
 
 ## After the freeze was redone (2026-11-11)
 
-The pinned commit moved to `3f06ba5` (comments shortened, four changes with no change in behaviour; `docs/PLAN.md`). On that code:
+The pinned commit moved to `2f52d48`. Its code is that of `3f06ba5`: comments shortened and four changes with no change in behaviour (`docs/PLAN.md`). On that code:
 
 | Check | Result |
 |---|---|
 | Unit tests, Windows 11, Python 3.14.9 | 254 run, 253 pass, 1 skipped. |
 | Unit tests, Ubuntu 22.04 in WSL, Python 3.10 | 254 run, 253 pass, 1 skipped. |
 | `hermes gateway restart`, then `hermes cassette run h-freeze-check --model gpt-oss:20b` | PASS 2/2, 2 calls: 0 hit, 2 synthesized, 0 miss. 13 s. Exit 0. |
+| The same again, after a second gateway restart | PASS 2/2, 2 calls: 0 hit, 2 synthesized, 0 miss. 9 s. Exit 0. |
 
-Not rerun on `3f06ba5`: a recording, the llama3.1:8b replay, and the README walkthrough from start to finish. The runs below were made on `fa1f9fc`.
+Not rerun on this code: a recording, the llama3.1:8b replay, and the README walkthrough from start to finish. The runs below were made on `fa1f9fc`.
 
 ## Video preparation runs (2026-11-11, after the freeze)
 
