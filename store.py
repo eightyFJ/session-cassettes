@@ -1,16 +1,14 @@
 """Cassette file format, call keys, path normalisation and the on-disk store.
 
-Standard library only. Nothing in this module imports Hermes: the plugin
-validator imports the package in a bare interpreter (docs/PLAN.md, section 1).
+Standard library only.
 
-Security notes (docs/PLAN.md, section 5a):
-- SEC-5: cassette names are checked against NAME_RE and the Windows reserved
-  device names, and every file path is resolved and checked to sit inside the
-  store's base directory.
-- SEC-6: files are parsed with ``json.loads`` only, after a size cap, a strict
+- Names: a cassette name must match NAME_RE and not be a Windows reserved
+  device name, and every file path must resolve inside the store's base
+  directory.
+- Reads: files are parsed with ``json.loads`` only, after a size cap, a strict
   UTF-8 decode and a check of ``format`` and every field type.
-- SEC-8: writes go to a temporary file in the same folder and are then moved
-  into place with ``os.replace``.
+- Writes: a temporary file in the same folder, moved into place with
+  ``os.replace``.
 """
 
 from __future__ import annotations
@@ -26,24 +24,25 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from .verdict import VerdictError, validate_pin
+
 FORMAT = 1
 
-NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")  # always used with fullmatch
+NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 _RESERVED_NAMES = frozenset(
     ["CON", "PRN", "AUX", "NUL"]
     + [f"COM{i}" for i in range(10)]
     + [f"LPT{i}" for i in range(10)]
 )
 
-#: Hard cap on any JSON file this plugin reads (cassettes, arms, bindings).
+#: Hard cap on any JSON file this plugin reads.
 MAX_FILE_BYTES = 32 * 1024 * 1024
 
 #: Longest argument text quoted back in a ``cassette miss`` error.
 _MISS_ARGS_CHARS = 300
 
-# Hermes's own defaults for the file tools (tools/file_tools.py, schemas and
-# handlers). An argument equal to its default is dropped from the key, so a
-# model that spells out ``offset: 1`` gets the same key as one that omits it.
+# Hermes's defaults for the file tools. An argument equal to its default is
+# dropped from the key, so ``offset: 1`` and no offset give the same key.
 _READ_DEFAULTS = {"offset": 1, "limit": 2000}
 _SEARCH_DEFAULTS = {
     "target": "content",
@@ -63,7 +62,7 @@ class CassetteError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# Names and paths inside the store (SEC-5)
+# Names and paths inside the store
 # ---------------------------------------------------------------------------
 
 
@@ -91,7 +90,7 @@ def safe_join(base_dir: os.PathLike | str, *parts: str) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Argument and path normalisation (decision 3)
+# Argument and path normalisation
 # ---------------------------------------------------------------------------
 
 _DRIVE_RE = re.compile(r"^([A-Za-z]):(.*)$")
@@ -120,10 +119,9 @@ def _normalise(path: Any, cwd: Optional[str], fold: bool) -> str:
         m = _MSYS_RE.match(s)  # Git Bash style: /c/repo -> c:/repo
         if m:
             s = f"{m.group(1)}:{m.group(2) or '/'}"
-    if s.startswith("~"):
-        # Home expansion depends on the machine; keep it literal.
-        pass
-    elif not (_is_windows_style(s) or s.startswith("/")) and cwd_s:
+    # A "~" path stays literal: home expansion depends on the machine.
+    anchored = _is_windows_style(s) or s.startswith(("/", "~"))
+    if cwd_s and not anchored:
         s = cwd_s.rstrip("/") + "/" + s if s not in ("", ".") else cwd_s
     m = _DRIVE_RE.match(s)
     if m:
@@ -171,12 +169,11 @@ def _as_int(value: Any, default: int) -> int:
 
 
 def normalize_args(tool: str, args: Any, cwd: Optional[str]) -> dict:
-    """The arguments a tool's result actually depends on, in canonical form.
+    """The arguments a tool's result depends on, in canonical form.
 
     For ``read_file`` and ``search_files`` this mirrors the Hermes handlers:
-    unknown keys are ignored (so they are dropped), ``query`` is *not* an alias
-    of ``pattern`` (Hermes reads ``args.get("pattern", "")``), a blank search
-    path means ``"."``, and default-valued arguments are dropped.
+    unknown keys are dropped (``query`` is not an alias of ``pattern``), a
+    blank search path means ``"."``, and default-valued arguments are dropped.
     """
     if not isinstance(args, dict):
         args = {}
@@ -301,7 +298,10 @@ class Cassette:
             self.warnings.append(text)
 
     def add_pin(self, pin: str) -> str:
-        text = _validate_pin_text(pin)
+        try:
+            text = validate_pin(pin)
+        except VerdictError as exc:
+            raise CassetteError(str(exc)) from None
         if text not in self.pins:
             self.pins.append(text)
         return text
@@ -327,7 +327,7 @@ class Cassette:
 
     @classmethod
     def from_dict(cls, data: Any) -> "Cassette":
-        """Build a cassette from parsed JSON, checking every field (SEC-6)."""
+        """Build a cassette from parsed JSON, checking every field."""
         if not isinstance(data, dict):
             raise CassetteError("cassette file is not a JSON object")
         fmt = data.get("format")
@@ -402,18 +402,8 @@ def _check(data: dict, key: str, typ: type, required: bool = False) -> None:
         raise CassetteError(f"cassette field {key!r} must be {typ.__name__}")
 
 
-def _validate_pin_text(pin: Any) -> str:
-    # Imported lazily so store.py and verdict.py stay independent at import time.
-    from .verdict import VerdictError, validate_pin
-
-    try:
-        return validate_pin(pin)
-    except VerdictError as exc:
-        raise CassetteError(str(exc)) from None
-
-
 # ---------------------------------------------------------------------------
-# Safe file I/O (SEC-6, SEC-8)
+# Safe file I/O
 # ---------------------------------------------------------------------------
 
 
@@ -421,7 +411,7 @@ def read_json_file(path: os.PathLike | str, max_bytes: Optional[int] = None) -> 
     """Read one JSON file with a size cap and a strict UTF-8 decode.
 
     Raises CassetteError for every failure: missing, too big, not UTF-8, not
-    JSON. Never uses pickle, eval or YAML.
+    JSON.
     """
     max_bytes = MAX_FILE_BYTES if max_bytes is None else max_bytes
     p = Path(path)
@@ -471,8 +461,8 @@ def atomic_write_json(path: os.PathLike | str, data: Any) -> None:
 
 
 def _replace_with_retry(src: str, dst: str, attempts: int = 10) -> None:
-    # On Windows os.replace fails with PermissionError while another process
-    # (an antivirus scanner, a concurrent reader) holds the target open.
+    """``os.replace``, retried: on Windows it raises PermissionError while
+    another process holds the target open."""
     for i in range(attempts):
         try:
             os.replace(src, dst)
@@ -549,22 +539,23 @@ MISS = "miss"
 class ReplayIndex:
     """Answers tool calls for one replay binding.
 
-    The cursor for repeated keys lives here, not in the cassette (decision 3,
-    amended), so two runs never share it. A key recorded several times is
-    answered in recorded order, then the last result repeats.
+    A key recorded several times is answered in recorded order, then the last
+    result repeats. The cursor lives here, not in the cassette, so two runs
+    never share it.
+
+    ``synthesize(cassette, tool, args)`` answers a call that was not recorded,
+    or returns None (``snapshot.synthesize``).
 
     ``answer`` returns ``(kind, result)`` where kind is HIT, SYNTH or MISS.
     It never raises and never runs a tool.
     """
 
-    def __init__(self, cassette: Cassette, synthesize: Optional[Callable] = None):
+    def __init__(self, cassette: Cassette, synthesize: Callable[[Cassette, str, Any], Optional[str]]):
         self.cassette = cassette
         self._by_key: dict = {}
         for call in cassette.calls:
             self._by_key.setdefault(call.key, []).append(call.result)
         self._cursor: dict = {}
-        if synthesize is None:
-            from .snapshot import synthesize as synthesize
         self._synthesize = synthesize
 
     def answer(self, tool: Any, args: Any) -> tuple:
@@ -581,5 +572,5 @@ class ReplayIndex:
             if synth is not None:
                 return SYNTH, synth
             return MISS, miss_result(tool_name, args)
-        except Exception as exc:  # fail closed (SEC-7)
+        except Exception as exc:  # fail closed
             return MISS, miss_result(tool, args, f"internal error: {type(exc).__name__}")

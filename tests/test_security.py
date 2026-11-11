@@ -1,5 +1,5 @@
 """SEC-5 (path traversal), SEC-6 (untrusted file parsing) and SEC-8 (atomic
-writes) from docs/PLAN.md section 5a. The SEC-8 arm-claim race is block C."""
+writes) of docs/SECURITY.md."""
 
 import json
 import os

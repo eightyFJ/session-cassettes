@@ -16,7 +16,7 @@ class NormalisePathTests(unittest.TestCase):
             "./x.py",
             "x.py",
             ".\\x.py",
-            "/c/repo/x.py",  # Git Bash / MSYS form seen in a real search result
+            "/c/repo/x.py",  # Git Bash / MSYS form
             "..\\Repo\\x.py",
             "C:/Repo/sub/../x.py",
             "  C:\\REPO\\X.PY  ",

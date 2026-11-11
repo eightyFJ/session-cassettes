@@ -1,9 +1,8 @@
 """The plugin's hooks and middleware (__init__.py), driven the way Hermes
 drives them, with a fake ``next_call`` standing in for the real tool.
 
-Covers block C of docs/PLAN.md: record, replay, the miss path, the turn-bound
-binding of decision 9, SEC-7 (replay fails closed: ``next_call`` never runs)
-and the SEC-8 claim race at the hook level.
+Covers record, replay, the miss path, the turn-bound binding, replay failing
+closed (``next_call`` never runs) and the claim race at the hook level.
 """
 
 import json
@@ -355,7 +354,7 @@ class Record(PluginCase):
 
     def test_plain_at_signs_are_fine(self):
         for message in ["mail bob@example.com about it", "what does the @property decorator do?", "a @ b"]:
-            self.assertEqual(plugin._record_refusal(message), "", message)
+            self.assertEqual(arms.request_refusal(message), "", message)
 
     def test_non_text_and_empty_messages_are_refused(self):
         for message in [[{"type": "image"}], None, "", "   \n"]:
@@ -846,8 +845,7 @@ class Claim(PluginCase):
         self.assertTrue(arms.arm_path(self.data, arm["id"]).exists())
 
     def test_two_sessions_with_the_same_first_message_one_claims(self):
-        # Grok's S1 review, item 1: equal text is not an exclusive claim. The
-        # exclusive file create is.
+        # Equal text is not an exclusive claim; the exclusive file create is.
         for round_no in range(25):
             arm = arms.create_arm(self.data, "auth-port", REQUEST, now=self.now)
             barrier = threading.Barrier(6)
@@ -889,8 +887,8 @@ class Claim(PluginCase):
         self.assertEqual(v.result, verdict.INVALID)
 
     def test_a_claim_landing_while_a_live_call_runs_makes_the_run_invalid(self):
-        # Grok, block C review, rule 2: the abandoned pre_llm_call worker can bind
-        # the replay after a call passed routing but before its tool returned.
+        # An abandoned pre_llm_call worker can bind the replay after a call
+        # passed routing but before its tool returned.
         # Even with the turn's live count evicted, the in-flight count catches it.
         arms.create_arm(self.data, "auth-port", REQUEST, now=self.now)
         claimed = {}
@@ -914,8 +912,8 @@ class Claim(PluginCase):
         self.assertTrue(any("still running live" in r for r in ledger["invalid_reasons"]))
 
     def test_the_turn_ending_during_the_claim_setup_still_gets_its_reasons(self):
-        # Grok, block C recheck, section 1: post_llm_call can run on the agent
-        # thread while the abandoned hook worker is still inside _bind_replay.
+        # post_llm_call can run on the agent thread while an abandoned hook
+        # worker is still inside _bind_replay.
         # The done ledger must wait for the setup and carry its reasons, and a
         # later "claimed" write must not replace it.
         arm = arms.create_arm(self.data, "auth-port", REQUEST, now=self.now)
@@ -952,7 +950,7 @@ class Claim(PluginCase):
         self.assertEqual(self.ledger(arm)["state"], arms.DONE)
 
     def test_threads_racing_a_claim(self):
-        # Real threads, not an imitation: 8 tool calls are inside next_call when
+        # Real threads: 8 tool calls are inside next_call when
         # the claim lands on another thread, then 8 more start after it.
         arm = arms.create_arm(self.data, "auth-port", REQUEST, now=self.now)
         entered, release = threading.Semaphore(0), threading.Event()
@@ -996,13 +994,13 @@ class Claim(PluginCase):
         with self.assertRaises(ValueError):
             self.tool("S-x", "T", "read_file", {"path": "x"}, mock.Mock(side_effect=ValueError("tool broke")))
         self.assertEqual(self.rt._inflight, {})
-        with self.assertRaises(LiveToolRan):  # a BaseException, as Grok asked
+        with self.assertRaises(LiveToolRan):  # a BaseException
             self.tool("S-x", "T", "read_file", {"path": "x"}, forbidden())
         self.assertEqual(self.rt._inflight, {})
 
     def test_retired_replay_turns_outlive_the_small_tables(self):
-        # Grok, block C review, rule 1: a retired turn must not be trimmed with
-        # the 512-entry bookkeeping tables, or its late calls would run live.
+        # A retired turn must not be trimmed with the small bookkeeping tables,
+        # or its late calls would run live.
         with mock.patch.object(plugin, "_MAX_TRACKED", 2):
             for sid in ["S-old", "S1", "S2", "S3", "S4"]:
                 self.now += 1
@@ -1137,7 +1135,6 @@ class Sec7FailClosed(PluginCase):
         self.assertTrue(any("internal error" in r for r in self.ledger(arm)["invalid_reasons"]))
 
     def test_exception_inside_the_answer_is_a_miss_and_makes_the_run_invalid(self):
-        # Grok, block C review, rule 4: _replay's own except used to log a miss only.
         arm = self.start_replay()
         with mock.patch.object(store.ReplayIndex, "answer", side_effect=RuntimeError("boom")):
             next_call = forbidden()

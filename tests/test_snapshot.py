@@ -50,7 +50,7 @@ class Base(unittest.TestCase):
 
 class NamedPathsTests(unittest.TestCase):
     def test_dense_matches_text(self):
-        # Shape copied from a real search_files result in the S1 probe log.
+        # The shape of a real search_files result.
         result = json.dumps({
             "total_count": 7,
             "matches_format": "path-grouped: ...",
@@ -283,7 +283,7 @@ class SynthSearchTests(Base):
         return None if out is None else json.loads(out)
 
     def test_content_search_in_a_file_only_read(self):
-        # gpt-oss greps for AUTH_PORT in a file Arete's run only read.
+        # A replay greps for AUTH_PORT in a file the recording only read.
         snapshot.capture(self.cas, ["server/auth.py"])
         out = self.search(pattern="AUTH_PORT", path="")
         self.assertEqual(out["total_count"], 2)
@@ -356,7 +356,7 @@ class SynthSearchTests(Base):
 
     def test_replay_index_uses_snapshot(self):
         self.capture_all()
-        idx = store.ReplayIndex(self.cas)
+        idx = store.ReplayIndex(self.cas, snapshot.synthesize)
         kind, result = idx.answer("search_files", {"pattern": "AUTH_PORT"})
         self.assertEqual(kind, "synthesized")
         kind, _ = idx.answer("search_files", {"pattern": "x", "path": "C:\\Windows"})

@@ -9,19 +9,19 @@
 This module runs in the user's terminal process, not in the gateway. ``run``
 meets the gateway's hooks through the arm and ledger files (arms.py):
 
-1. write ``armed/<id>.json`` with the recorded request (one run at a time);
-2. start ``hermes chat -Q --query=<request>`` as a child process with an
-   argument list, never a shell (SEC-4). Not ``hermes -z``: that mode
-   auto-approves dangerous commands, ``chat -Q`` denies them. The gateway session whose first message is that
-   request claims the arm, and every tool call of its turn is answered from the
-   cassette;
-3. read the ledger the hooks wrote, check that the claimed turn's final answer
-   is what the child printed, grade it with ``verdict.compute_verdict``, and
-   save the result to ``runs/<cassette>/<timestamp>.json``;
-4. remove the arm files, whatever happened.
+1. check that the gateway has this plugin loaded, with the same code;
+2. write ``armed/<id>.json`` with the recorded request (one run at a time);
+3. start ``hermes chat -Q --query=<request>`` as a child process, with an
+   argument list and no shell. The gateway session whose first message is
+   that request claims the arm, and every tool call of its turn is answered
+   from the cassette;
+4. read the ledger the hooks wrote, check that the claim belongs to the child,
+   grade the answer with ``verdict.compute_verdict`` and save the result to
+   ``runs/<cassette>/<timestamp>.json``;
+5. remove the arm files, whatever happened.
 
-Hermes imports happen inside functions: ``hermes plugins validate`` imports the
-package in a bare interpreter.
+Hermes is imported inside functions only, so the package also loads where
+Hermes is not importable (``hermes plugins validate``).
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ MAX_CHILD_OUTPUT_BYTES = 16 * 1024 * 1024
 _ANSWER_PREVIEW_CHARS = 800
 _KEY_PREVIEW_CHARS = 110
 
-_RUN_FILE_RE = re.compile(r"\d{8}T\d{6}\d{3}Z-[0-9a-f]{8}")  # always used with fullmatch
+_RUN_FILE_RE = re.compile(r"\d{8}T\d{6}\d{3}Z-[0-9a-f]{8}")
 
 _EPILOG = """\
 exit codes of 'run': 0 PASS, 1 FAIL, 2 error (nothing was graded),
@@ -83,7 +83,7 @@ class CliError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# Hermes lookups. Lazy: Hermes is not importable where the validator runs.
+# Hermes lookups
 # ---------------------------------------------------------------------------
 
 
@@ -96,11 +96,10 @@ def _hermes_data_dir() -> Path:
 def find_hermes() -> list:
     """The command that starts Hermes, as an argument-list prefix.
 
-    The executable must be a real program. A ``.bat`` or ``.cmd`` wrapper is
-    refused, because Windows runs those through ``cmd.exe``, which re-parses
-    the arguments and would expand ``%VAR%`` and ``&`` inside the request
-    (SEC-4). The ``hermes`` that is running this command is preferred, so the
-    child uses the same install.
+    Only a real executable is accepted. Windows runs a ``.bat`` or ``.cmd``
+    wrapper through ``cmd.exe``, which would re-parse the request and expand
+    ``%VAR%`` and ``&`` in it. The ``hermes`` running this command is
+    preferred, so the child uses the same install.
     """
     windows = os.name == "nt"
     candidates = []
@@ -116,7 +115,7 @@ def find_hermes() -> list:
         if not path.is_file():
             continue
         if windows and suffix != ".exe":
-            continue  # .bat/.cmd go through cmd.exe; a bare zipapp can't be started
+            continue
         if not windows and suffix in (".bat", ".cmd"):
             continue
         return [str(path.resolve())]
@@ -127,7 +126,7 @@ def find_hermes() -> list:
 
 
 # ---------------------------------------------------------------------------
-# The child process (SEC-4)
+# The child process
 # ---------------------------------------------------------------------------
 
 
@@ -140,21 +139,15 @@ def build_child_argv(
     skills: Sequence[str] = (),
     workdir: str = "",
 ) -> list:
-    """Arguments for the replay child. Every value is joined to its flag with
-    ``=``, so no value can be read as a flag of its own: a request starting
-    with ``-``, or containing ``-p`` (which Hermes scans for before argparse),
-    stays one unchanged argument.
+    """Arguments for the replay child, ``hermes chat -Q --query=<request>``.
 
-    The child is ``hermes chat -Q --query=<request>``, never ``hermes -z``. In
-    Hermes 0.23.1 ``-z`` runs its turn unattended and auto-approves dangerous
-    commands (``hermes_cli/gateway_chat.py:236``, ``tools/approval.py:388``).
-    ``chat -Q`` is a finite single query: a dangerous command with nobody to
-    approve it is denied (``approvals.single_query_mode``, default ``deny``).
-    So under Hermes's default approval settings, a run whose claim failed
-    (it runs tools live and is graded INVALID) gets no approval nobody gave.
-    Settings the user chose still apply: ``approvals.mode: off``,
-    ``single_query_mode: approve``, a permanent allowlist entry. ``spawn``
-    drops ``HERMES_YOLO_MODE`` from the child's environment."""
+    Every value is joined to its flag with ``=``, so a request that starts
+    with ``-`` or contains a flag stays one unchanged argument.
+
+    The child is never ``hermes -z``, which auto-approves dangerous commands.
+    ``chat -Q`` denies them under Hermes's default approval settings, so a
+    turn that runs live because its claim failed gets no approval the user
+    did not give."""
     if not isinstance(request, str) or not request:
         raise CliError("the cassette has no request to replay")
     argv = list(hermes)
@@ -172,17 +165,14 @@ def build_child_argv(
 
 def replay_refusal(request: Any) -> str:
     """Why a cassette's request can't be replayed safely, or "" if it can.
-    A cassette file is untrusted (SEC-6). A request Hermes rewrites before the
-    plugin sees it (an @ reference) or handles itself (a slash command) can
-    never match its arm, so the claim would fail and the turn would run live."""
+    A request that Hermes rewrites (an @ reference) or handles itself (a slash
+    command) would never match its arm, so the turn would run live."""
     if not isinstance(request, str) or not arms.normalize_request(request):
         return "the cassette has no request to replay"
     text = arms.normalize_request(request)
     if text.startswith(("/", "!")):
         return "the cassette's request starts with '/' or '!', which Hermes treats as a command"
-    from . import _record_refusal
-
-    why = _record_refusal(request)
+    why = arms.request_refusal(request)
     return f"the cassette's request can't be replayed: {why}" if why else ""
 
 
@@ -213,23 +203,21 @@ def _read_back(fh: Any, tail: bool = False) -> str:
 
 
 def spawn(argv: Sequence[str], *, timeout: float, cwd: Optional[str] = None) -> ChildResult:
-    """Run the child with an argument list and no shell (SEC-4). Its stdin is
-    empty, so nothing can wait on a prompt. On timeout or Ctrl+C it is killed.
+    """Run the child with an argument list and no shell. Its stdin is empty,
+    so nothing can wait on a prompt. On timeout or Ctrl+C it is killed.
 
-    Output goes to temporary files, not pipes: on Windows, reading a pipe after
-    a timeout waits until every process holding it exits, and a launcher's
-    child process can outlive the launcher. A file can be read back at once."""
+    Output goes to temporary files rather than pipes: a pipe read blocks until
+    every process holding the pipe exits, and a launcher's child can outlive
+    the launcher."""
     env = dict(os.environ)
     env["PYTHONIOENCODING"] = "utf-8"  # the answer is compared character for character
-    # Hermes turns HERMES_YOLO_MODE in the launching shell into a yolo session
-    # (hermes_cli/gateway_chat.py, _ENV_LAUNCH_FLAGS), without --yolo on the
-    # command line. A replay child never inherits it.
+    # HERMES_YOLO_MODE would make the child a yolo session; a replay never inherits it.
     for name in [k for k in env if k.upper() == "HERMES_YOLO_MODE"]:
         del env[name]
     started = time.monotonic()
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
         try:
-            proc = subprocess.Popen(  # noqa: S603 - argument list, shell=False (SEC-4)
+            proc = subprocess.Popen(
                 list(argv),
                 stdin=subprocess.DEVNULL,
                 stdout=out,
@@ -428,7 +416,7 @@ def cmd_list(args: argparse.Namespace, base: Path) -> int:
         out = []
         for i, cell in enumerate(cells):
             padded = cell.ljust(widths[i]) if i < len(cells) - 1 else cell
-            out.append(verdict._paint(padded, result, colour) if i == 4 and result else padded)
+            out.append(verdict.paint(padded, result, colour) if i == 4 and result else padded)
         return "  ".join(out).rstrip()
 
     _out(fmt(headers))
@@ -511,15 +499,14 @@ def _wait_for_ledger(base: Path, arm_id: str, wait: float, sleep: Callable[[floa
 def preflight(base: Path, hermes: Sequence[str], workdir: str, *,
               run_child: Callable[..., ChildResult] = None, timeout: float = 120.0) -> dict:
     """Check, before the request is sent, that the gateway that will run it has
-    this plugin loaded, with the same code as this folder.
+    this plugin loaded, with the same code as this folder, and does not
+    auto-approve commands.
 
-    It sends ``/cassette ping <nonce>`` through ``hermes chat -Q``. Hermes hands
-    a slash command to the plugin's handler in the gateway, with no model call,
-    and the handler writes ``pongs/<nonce>.json`` with the gateway's
-    CODE_VERSION. No pong means the gateway has not loaded the plugin, so the
-    hooks could not claim the run and its tools would run live. A different
-    version means the gateway still runs older code. Either way nothing is
-    replayed. Raises CliError; returns the pong."""
+    Sends ``/cassette ping <nonce>`` through ``hermes chat -Q``. The plugin's
+    handler in the gateway answers by writing ``pongs/<nonce>.json``; no model
+    is called. Without a matching pong the hooks could not claim the run and
+    its tools would run live, so nothing is replayed. Returns the pong or
+    raises CliError."""
     run_child = run_child or spawn
     nonce = uuid.uuid4().hex
     argv = list(hermes) + ([f"--in={workdir}"] if workdir else []) + [
@@ -539,10 +526,8 @@ def preflight(base: Path, hermes: Sequence[str], workdir: str, *,
         raise CliError(f"the Hermes gateway runs a different version of session-cassettes "
                        f"({pong['version']}) than this folder ({arms.CODE_VERSION}). {restart}")
     if pong["yolo"]:
-        # tools/approval.py freezes the gateway's HERMES_YOLO_MODE at import:
-        # every session it hosts gets flagged commands approved. A replay is
-        # safe only while its claim holds; if the claim failed, the live turn
-        # would have them approved. The child's own environment can't undo it.
+        # The gateway's yolo mode covers every session it hosts; the child's
+        # environment cannot undo it.
         raise CliError("the Hermes gateway was started with HERMES_YOLO_MODE set, so it approves "
                        "dangerous commands for every session, and a replay whose claim failed would "
                        "run them. Restart the gateway from a shell without HERMES_YOLO_MODE "
@@ -560,13 +545,10 @@ def _child_session_id(stderr: str) -> str:
 
 
 def _gateway_redact(text: str) -> str:
-    """The answer ``hermes chat -Q`` prints can be redacted where the hooks'
-    copy is not: seen live, ``AUTH_PORT = 8080`` in the ledger printed as
-    ``AUTH_PORT=***``, and ``redact_sensitive_text`` of the ledger answer
-    reproduces the printed text exactly. Where Hermes applies it was not
-    pinned down (not ``gateway/session_results.py``, which redacts only the
-    stored copy). A print path that redacts differently makes the run INVALID,
-    which fails safe. Returns the text unchanged if Hermes isn't importable."""
+    """The answer as Hermes's redaction prints it. ``hermes chat -Q`` can print
+    the gateway's stored copy of the answer, which is redacted, while the
+    hooks see the original. Returns the text unchanged if Hermes isn't
+    importable."""
     try:
         from agent.redact import redact_sensitive_text
 
@@ -619,8 +601,7 @@ def replay(
     argv = build_child_argv(hermes, cassette.request, model=model, provider=provider,
                             skills=skills, workdir=workdir)
 
-    # The ping goes before the arm exists, so no other session can claim the
-    # arm while we wait for the gateway's answer.
+    # Ping before arming, so no other session can claim the arm during the wait.
     preflight(base, hermes, workdir, run_child=run_child, timeout=min(timeout, PING_TIMEOUT_SECONDS))
     arm = arms.create_arm(base, name, cassette.request, model=model)
     try:
@@ -659,8 +640,8 @@ def replay(
                 if not child.timed_out and not _same_answer(ledger["final_answer"], child.stdout):
                     reasons.append("the claiming session's final answer is not what hermes printed, "
                                    "so the claim may belong to another session")
-            # The session id is what ties the claim to this child: the answer
-            # check alone can't, since it also accepts Hermes's redacted copy.
+            # The session id ties the claim to this child; the answer check
+            # alone cannot, because it also accepts a redacted copy.
             child_session = _child_session_id(child.stderr)
             if not child.timed_out:
                 if not child_session:
@@ -724,7 +705,7 @@ def cmd_run(args: argparse.Namespace, base: Path) -> int:
 
 
 # ---------------------------------------------------------------------------
-# argparse wiring (ctx.register_cli_command)
+# Argument parsing
 # ---------------------------------------------------------------------------
 
 

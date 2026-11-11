@@ -1,5 +1,5 @@
-"""Arm, claim and ledger files (arms.py): decision 9 in docs/PLAN.md, plus the
-SEC-6 file checks and the SEC-8 claim race for these files."""
+"""Arm, claim and ledger files (arms.py), with their file checks and the
+claim race."""
 
 import json
 import os
@@ -228,8 +228,6 @@ class Sec8Claim(ArmsCase):
         self.assertFalse(arms.arm_path(self.base, arm["id"]).exists())
 
     def test_many_threads_claim_one_arm_and_exactly_one_wins(self):
-        # This test failed against an os.rename claim on Windows: up to three
-        # of eight threads were told their rename succeeded.
         for round_no in range(150):
             arm = self.arm(now=1000.0 + round_no)
             barrier = threading.Barrier(8)

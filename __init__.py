@@ -1,31 +1,27 @@
 """Session Cassettes: record a session's read-only tool results, then replay
 them offline against another model, prompt or skill.
 
-Everything in this module runs inside the Hermes gateway process, for every
-session that process hosts. So all state is keyed by session id, and a session
-this plugin has not bound is never touched: its tool calls go straight to
-``next_call``.
+This module runs inside the Hermes gateway process, for every session that
+process hosts. All state is keyed by session id, and a session the plugin has
+not bound is never touched: its tool calls go straight to ``next_call``.
 
-A *binding* ties one mode to one turn of one session (docs/PLAN.md, decision 9):
+A binding ties one mode to one turn of one session:
 
 record   ``/cassette record <name>`` arms the session. Its next turn is
          recorded: recordable tools run for real and their results are kept.
 replay   ``hermes cassette run`` writes an arm file (arms.py). The first turn
          of the CLI session whose message equals the recorded request claims
-         it. Every tool call of that turn is answered from the cassette, or
-         refused with a ``cassette miss``. ``next_call`` is never called, so
-         no real tool runs and no approval prompt can come up.
+         it. Every tool call of that turn is answered from the cassette or
+         refused with a ``cassette miss``; ``next_call`` is never called.
 
-Rules the replay path keeps (SEC-7):
-- No exception leaves the middleware callback for a replay-bound call. Hermes
-  treats a raising middleware as a broken plugin and runs the real tool.
-- A call on a replay session from any other turn (the background-review fork
-  shares the session id) is refused, never run, and is not a cassette miss.
-- A binding lasts until the session's next ``pre_llm_call``. Nothing is
-  released on ``post_llm_call``, and nothing expires while a turn runs.
+Replay fails closed:
+- No exception leaves the middleware for a replay-bound call. Hermes treats a
+  raising middleware as broken and runs the real tool.
+- A call from any other turn of a replay session is refused, never run.
+- A binding lasts until the session's next ``pre_llm_call``.
 
-Hermes imports happen inside functions: ``hermes plugins validate`` imports
-this module in a bare interpreter, where Hermes is not importable.
+Hermes is imported inside functions only, so the package also loads where
+Hermes is not importable (``hermes plugins validate``).
 """
 
 from __future__ import annotations
@@ -33,7 +29,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import threading
 import time
 from collections import OrderedDict
@@ -45,48 +40,38 @@ logger = logging.getLogger(__name__)
 
 PLUGIN_NAME = "session-cassettes"
 
-#: Tools whose results are recorded (docs/PLAN.md, decision 2). Any other tool
-#: runs live while recording and is noted by name only.
+#: Tools whose results are recorded. Any other tool runs live while recording
+#: and is noted by name only.
 RECORDED_TOOLS = frozenset({
     "read_file", "search_files", "web_search", "web_extract",
     "skill_view", "skills_list", "session_search",
 })
 
-#: ``terminal`` is recorded only for these read-only commands, with no shell
-#: operators, keyed on the exact command string plus working directory.
+#: ``terminal`` is recorded only for these read-only commands, without shell
+#: operators.
 _TERMINAL_COMMANDS = frozenset({"cat", "type", "dir", "ls", "rg"})
 _TERMINAL_GIT = frozenset({"log", "show", "diff"})
 _SHELL_OPERATORS = frozenset(";&|<>`$()\n\r")
 
 NOT_CLEAN = "this cassette may not replay cleanly"
 
-MAX_RESULT_CHARS = 2 * 1024 * 1024      # one result bigger than this is not recorded
+MAX_RESULT_CHARS = 2 * 1024 * 1024      # largest single result recorded
 MAX_RECORDED_CHARS = 12 * 1024 * 1024   # all recorded results of one cassette
 MAX_EVENTS = 5000                       # tool calls logged for one replay turn
 MAX_BINDINGS = 64                       # sessions remembered at once
-MAX_LOADED_REPLAYS = 16                 # unfinished replay turns that keep their cassette in memory
-REPLAY_GRACE_SECONDS = 600.0            # a finished replay session keeps refusing at least this long
-_MAX_TRACKED = 512                      # bound on each small bookkeeping table
-# Tables whose eviction would weaken fail-closed: the live-call counts (an evicted
-# count hides calls that ran before a late claim) and the retired replay turns
-# (an evicted entry lets a late call of that turn pass through). One retired
-# entry per replay run; a live-call entry per turn that ran tools, a few hundred bytes each.
-_MAX_GUARDED = 10_000
+MAX_LOADED_REPLAYS = 16                 # unfinished replays that keep their cassette in memory
+REPLAY_GRACE_SECONDS = 600.0            # a finished replay session keeps refusing this long
+_MAX_TRACKED = 512                      # bound on each bookkeeping table
+_MAX_GUARDED = 10_000                   # bound on the two tables replay safety depends on
 
 _RECORD, _REPLAY = "record", "replay"
-# _PASS: passed through and counted against its session; _PASS_UNCOUNTED: passed
-# through without a session to count against (no id, or routing failed).
+# A _PASS call is counted against its session; _PASS_UNCOUNTED has no session.
 _PASS, _DO_RECORD, _DO_REPLAY, _DO_REFUSE, _PASS_UNCOUNTED = range(5)
 
 _REFUSED = json.dumps({
     "error": "cassette replay: this call is outside the replayed turn, so it was refused. Nothing ran."
 })
 _STATIC_MISS = json.dumps({"error": "cassette miss"})
-
-# An @ reference as Hermes spells it (agent/context_references.py): @diff,
-# @staged, or @<kind>:<value>. Hermes expands these before plugins see the text.
-_AT_REFERENCE_RE = re.compile(r"(?<![\w/])@(?:(?:diff|staged)\b|[A-Za-z][A-Za-z0-9_-]*:\S)")
-_ATTACHED_CONTEXT_MARK = "--- Attached Context ---"
 
 _USAGE = (
     "Session Cassettes\n"
@@ -100,7 +85,7 @@ _USAGE = (
 
 
 # ---------------------------------------------------------------------------
-# Hermes lookups. Lazy: Hermes is not importable where the validator runs.
+# Hermes lookups
 # ---------------------------------------------------------------------------
 
 
@@ -111,16 +96,10 @@ def _hermes_data_dir():
 
 
 def _hermes_redact(text: str, path: str) -> str:
-    """Hermes's own redaction for file content shown to a model. The snapshot
-    reads files from disk, so it gets the same treatment a live read_file gets.
-
-    A live read_file also passes ``secret_file=True`` for the files Hermes
-    treats as secret-bearing (``tools/file_tools.py``). Those are ``.env``-style
-    and shell rc names, which the snapshot never captures (hidden paths), and a
-    ``config.yaml`` under the Hermes home. The helper that tells a Hermes-home
-    ``config.yaml`` apart is private, so every ``config.yaml`` (and the backup
-    copies Hermes writes of it) gets the stricter mode: a project's own
-    ``config.yaml`` may be over-redacted, never under-redacted."""
+    """Hermes's own redaction for file content shown to a model, so a snapshot
+    file gets the treatment a live ``read_file`` result gets. Every
+    ``config.yaml``, and Hermes's backup copies of it, is redacted in the
+    stricter secret-file mode."""
     from agent.redact import redact_sensitive_text
 
     base = str(path).replace("\\", "/").rsplit("/", 1)[-1].lower()
@@ -189,20 +168,6 @@ def _readonly_terminal(args: Any) -> bool:
     return False
 
 
-def _record_refusal(user_message: Any) -> str:
-    """Why this message cannot be recorded, or "" if it can."""
-    if not isinstance(user_message, str):
-        return "the message is not plain text, and a replay can only send text."
-    if not arms.normalize_request(user_message):
-        return "the message is empty."
-    if len(user_message) > arms.MAX_REQUEST_CHARS:
-        return "the message is too long to replay."
-    if _AT_REFERENCE_RE.search(user_message) or _ATTACHED_CONTEXT_MARK in user_message:
-        return ("the message uses an @ reference. Hermes expands those before a plugin sees "
-                "the text, so the request could not be replayed word for word.")
-    return ""
-
-
 def _trim(table: OrderedDict, limit: Optional[int] = None) -> None:
     limit = _MAX_TRACKED if limit is None else limit
     while len(table) > limit:
@@ -238,12 +203,11 @@ class _Binding:
         self.refused = 0                # calls from other turns of this session
         self.invalid: list = []         # reasons this run cannot be trusted
         self.final_answer = ""
-        # The done ledger needs both halves: the claim's setup (its INVALID
-        # reasons, the cassette load) and the end of the turn. They run on
-        # different threads, so whichever finishes second writes it, once.
+        # The done ledger is written once, after both the claim's setup and
+        # the turn have finished. The two run on different threads.
         self.setup_done = False
         self.ledger_final = False
-        self.write_lock = threading.Lock()  # one ledger write at a time, never done -> claimed
+        self.write_lock = threading.Lock()  # one ledger write at a time
         # record
         self.cassette: Any = None
         self.overwrite = False
@@ -292,14 +256,12 @@ class Runtime:
         try:
             binding, action = self._route(kwargs.get("session_id"), kwargs.get("turn_id"))
         except Exception:
-            # Cannot tell whose call this is. While a replay is bound, refuse
-            # rather than risk running a real tool for it.
+            # An unroutable call is refused while any replay is bound.
             if self._replay_active:
                 return _REFUSED
             binding, action = None, _PASS_UNCOUNTED
         if action == _DO_REPLAY or action == _DO_REFUSE:
-            # Nothing below may raise or reach next_call: a raise here would
-            # make Hermes run the real tool.
+            # Nothing here may raise or reach next_call.
             try:
                 if action == _DO_REPLAY:
                     return self._replay(binding, tool_name, args)
@@ -317,10 +279,9 @@ class Runtime:
         return next_call(args)
 
     def _pass_through(self, session_id: Any, next_call: Any, args: Any) -> Any:
-        """Run a call that belongs to no binding. While it runs it is counted as
-        in flight for its session, so a replay claim that lands meanwhile (a
-        pre_llm_call that outlived Hermes's hook timeout) sees it and marks the
-        run INVALID. A tool already running cannot be stopped; it can be reported."""
+        """Run a call that belongs to no binding. It counts as in flight for
+        its session while it runs, so a replay claim that lands meanwhile marks
+        its run INVALID."""
         sid = _text(session_id)
         try:
             return next_call(args)
@@ -405,7 +366,7 @@ class Runtime:
             keep = self._should_record(b, tool_name, args)
         except Exception:
             keep = False
-        result = next_call(args)  # the real tool; its errors are Hermes's to handle
+        result = next_call(args)  # the real tool's errors propagate to Hermes
         try:
             self._note_call(b, tool_name, args, result, keep)
         except Exception:
@@ -418,8 +379,8 @@ class Runtime:
             return True
         if tool_name == "terminal":
             with b.lock:
-                # After one command outside the read-only list, later terminal
-                # output may depend on what it changed, so none of it is kept.
+                # One command outside the read-only list taints the rest:
+                # later output may depend on what it changed.
                 if b.terminal_tainted:
                     return False
                 if _readonly_terminal(args):
@@ -489,7 +450,7 @@ class Runtime:
     def _begin_record(self, sid: str, tid: str, pending: dict, user_message: Any,
                       model: Any, platform: Any) -> Any:
         name = pending["name"]
-        problem = _record_refusal(user_message)
+        problem = arms.request_refusal(user_message)
         if problem:
             self._clear_pending(pending)
             self._set_status(sid, f"recording {name!r} was cancelled: {problem}")
@@ -535,22 +496,20 @@ class Runtime:
         with self._lock:
             live = self._live_calls.get((sid, tid), 0)
             running = self._inflight.get(sid, 0)
-            # The reasons go on the binding before anyone else can see it.
             if live:
                 b.invalid.append(f"{live} tool call(s) of this turn ran live before the cassette was bound")
             if running:
                 b.invalid.append(f"{running} tool call(s) of this session were still running live "
                                  "when the cassette was bound")
-            # Bound before the cassette loads: from here every call of this turn
-            # is answered from the cassette or refused. With no cassette loaded
-            # yet (or ever), each answer is a miss.
+            # Bound before the cassette loads: until it has, every call of the
+            # turn is answered with a miss.
             self._bindings[sid] = b
             self._replay_active += 1
             self._trim_locked()
         b.model, b.platform, b.cwd = _text(model), _text(platform), self._cwd()
         try:
             cassette = store.CassetteStore(base).load(arm["cassette"])
-            index = store.ReplayIndex(cassette)
+            index = store.ReplayIndex(cassette, snapshot.synthesize)
         except Exception as exc:
             reason = f"the cassette could not be loaded: {exc}"[:300]
             with b.lock:
@@ -588,15 +547,13 @@ class Runtime:
             b.finished = True
             b.finished_at = self._clock()
             b.final_answer = answer
-            b.index = None  # the cassette is no longer needed; later calls are refused
+            b.index = None  # later calls are refused
         self._write_ledger(b)
 
     def _write_ledger(self, b: _Binding) -> bool:
-        """Write what this binding knows to ``claimed/<id>.json`` for the
-        process that armed the run. The state is ``done`` only once the claim's
-        setup and the turn have both finished; whichever comes second writes it,
-        and nothing is written after it. A failed write leaves the run unproven,
-        which the verdict reports as INVALID."""
+        """Write the binding's state to ``claimed/<id>.json`` for the process
+        that armed the run. The state becomes ``done`` once the claim's setup
+        and the turn have both finished, and nothing is written after that."""
         try:
             with b.write_lock:
                 return self._write_ledger_locked(b)
@@ -634,7 +591,7 @@ class Runtime:
         if written and state == arms.DONE:
             with b.lock:
                 b.ledger_final = True
-                b.events = []  # the ledger has them; the binding stays only to refuse
+                b.events = []  # the ledger holds them now
         return written
 
     def _finish_record(self, b: _Binding, answer: str, model: Any) -> None:
@@ -652,7 +609,7 @@ class Runtime:
         except Exception as exc:
             logger.warning("session-cassettes: saving a recording failed", exc_info=True)
             status = f"cassette {cassette.name!r} was NOT saved: internal error ({type(exc).__name__})"
-        self._clear_pending(b.pending)  # a recording is one completed turn
+        self._clear_pending(b.pending)
         self._set_status(b.session_id, status)
 
     def _save_recording(self, b: _Binding, cassette: Any, paths: list, live: dict, oversize: int,
@@ -730,12 +687,10 @@ class Runtime:
             _trim(self._retired, _MAX_GUARDED)
 
     def _trim_locked(self) -> None:
-        """Keep the tables small in a gateway that runs for weeks. Dropped, in
-        this order: finished recordings; replays that finished more than
-        REPLAY_GRACE_SECONDS ago (until then the session keeps refusing, which
-        covers the background-review fork that follows a turn); unfinished
-        recordings (their tools run live either way). An unfinished replay
-        binding is never dropped. Old ones only give up their cassette."""
+        """Bound the binding table. Dropped first: finished recordings, then
+        replays that finished more than REPLAY_GRACE_SECONDS ago, then
+        unfinished recordings. An unfinished replay is never dropped; the
+        oldest only give up their loaded cassette."""
         by_age = sorted(self._bindings.values(), key=lambda b: b.started)
         over = len(by_age) - MAX_BINDINGS
         settled = self._clock() - REPLAY_GRACE_SECONDS
@@ -751,7 +706,7 @@ class Runtime:
                 if wanted(b) and self._bindings.get(b.session_id) is b:
                     self._drop_locked(b)
                     over -= 1
-        # Runs as a binding is added, before its own cassette loads: it takes the last slot.
+        # The binding being added has not loaded yet; one slot is kept for it.
         loaded = [b for b in by_age if b.mode == _REPLAY and not b.finished and b.index is not None]
         for b in loaded[:max(0, len(loaded) - (MAX_LOADED_REPLAYS - 1))]:
             b.index = None
@@ -789,9 +744,8 @@ class Runtime:
 
     @staticmethod
     def _keys(sid: str, skey: str) -> set:
-        """Where a record request is filed. The session id when there is one.
-        A brand-new session may not have an id yet; then its route key stands
-        in until the first turn supplies the id."""
+        """Where a record request is filed: under the session id, or under the
+        session's route key until its first turn supplies an id."""
         if sid:
             return {"id:" + sid}
         return {"key:" + skey} if skey else set()
@@ -804,9 +758,8 @@ class Runtime:
         return None
 
     def _cmd_ping(self, words: list) -> str:
-        """``hermes cassette run`` sends ``/cassette ping <nonce>`` before it arms
-        a run. Writing the pong proves this process (the gateway) has the plugin
-        loaded, and says which code it loaded. Not listed in the usage text."""
+        """Answer the preflight of ``hermes cassette run``: write a pong that
+        proves the gateway has this plugin loaded, and names the code it loaded."""
         if len(words) != 1:
             return "cassette: ping takes one nonce"
         arms.write_pong(self._data_dir(), words[0].lower(), arms.CODE_VERSION, os.getpid(), self._clock(),
@@ -923,8 +876,7 @@ def register(ctx: Any) -> None:
         description="Record this session's tool results as a replayable cassette",
         args_hint="record <name> | stop | status | pin <name> <fact> | list",
     )
-    # `hermes cassette ...` in a terminal: run, pin, list, show (cli.py). Hermes
-    # skips this one under plugins.isolation: host; the slash command still works.
+    # Not every context offers CLI registration (plugins.isolation: host).
     register_cli = getattr(ctx, "register_cli_command", None)
     if register_cli is not None:
         register_cli(

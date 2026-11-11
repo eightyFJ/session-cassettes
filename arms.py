@@ -1,4 +1,4 @@
-"""Arm, claim and run-ledger files (docs/PLAN.md, decision 9).
+"""Arm, claim and run-ledger files.
 
 ``hermes cassette run`` and the plugin's hooks run in different processes: the
 command in the user's terminal, the hooks in the long-lived Hermes gateway.
@@ -6,22 +6,19 @@ They meet through small JSON files in the plugin data folder:
 
     armed/<id>.json     written by ``cassette run``: "replay cassette X for the
                         session whose first message is exactly this request"
-    claimed/<id>.json   created by the one session that claimed the arm. The
-                        hooks then rewrite it as the run's ledger: which
-                        session and turn were bound, every tool call answered,
-                        the final answer.
-    pongs/<nonce>.json  written by the gateway's ``/cassette ping <nonce>``
-                        before a run starts: proof that the gateway has this
-                        plugin loaded, and which code it loaded (CODE_VERSION).
+    claimed/<id>.json   created by the one session that claimed the arm, then
+                        rewritten by the hooks as the run's ledger: the session
+                        and turn bound, every tool call answered, the final
+                        answer
+    pongs/<nonce>.json  the gateway's answer to ``/cassette ping <nonce>``:
+                        proof that it has this plugin loaded, and which code
 
-Claiming is the exclusive creation of ``claimed/<id>.json`` (``O_EXCL``), so
-exactly one caller can win (SEC-8). It is deliberately not a rename: on
-Windows, several threads renaming the same file to the same name can all be
-told they succeeded, and the claim-race test caught exactly that. An arm
-nobody claims expires after ARM_TTL_SECONDS. A claimed arm never expires.
+A claim is the exclusive creation of ``claimed/<id>.json`` (``O_EXCL``), so
+exactly one caller wins. An unclaimed arm expires after ARM_TTL_SECONDS; a
+claimed arm never expires.
 
-Standard library only; nothing here imports Hermes. Every file is read through
-``store.read_json_file`` with a size cap and a field-by-field check (SEC-6).
+Standard library only. Every file is read through ``store.read_json_file``
+with a size cap, and checked field by field.
 """
 
 from __future__ import annotations
@@ -84,7 +81,11 @@ def code_version(root: os.PathLike | str) -> str:
 #: gateway's, so a gateway still running older code is caught before a run.
 CODE_VERSION = code_version(Path(__file__).resolve().parent)
 
-_ID_RE = re.compile(r"[0-9a-f]{32}")  # always used with fullmatch
+_ID_RE = re.compile(r"[0-9a-f]{32}")
+
+# An @ reference as Hermes spells it: @diff, @staged or @<kind>:<value>.
+_AT_REFERENCE_RE = re.compile(r"(?<![\w/])@(?:(?:diff|staged)\b|[A-Za-z][A-Za-z0-9_-]*:\S)")
+_ATTACHED_CONTEXT_MARK = "--- Attached Context ---"
 
 
 def normalize_request(text: Any) -> str:
@@ -93,6 +94,21 @@ def normalize_request(text: Any) -> str:
     if not isinstance(text, str):
         return ""
     return text.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def request_refusal(message: Any) -> str:
+    """Why this message cannot be recorded and replayed word for word, or ""
+    if it can."""
+    if not isinstance(message, str):
+        return "the message is not plain text, and a replay can only send text."
+    if not normalize_request(message):
+        return "the message is empty."
+    if len(message) > MAX_REQUEST_CHARS:
+        return "the message is too long to replay."
+    if _AT_REFERENCE_RE.search(message) or _ATTACHED_CONTEXT_MARK in message:
+        return ("the message uses an @ reference. Hermes expands those before a plugin sees "
+                "the text, so the request could not be replayed word for word.")
+    return ""
 
 
 def validate_arm_id(arm_id: Any) -> str:
@@ -110,7 +126,7 @@ def claimed_path(base_dir: os.PathLike | str, arm_id: str) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Reading (SEC-6)
+# Reading
 # ---------------------------------------------------------------------------
 
 
@@ -333,13 +349,10 @@ def create_arm(
 def claim(base_dir: os.PathLike | str, arm_id: str) -> bool:
     """Claim an arm. True for exactly one caller, ever. Never raises.
 
-    The claim is the exclusive creation of ``claimed/<id>.json``: the file
-    system creates a new name for one caller only, and every other caller gets
-    "already exists". The winner copies the arm into that file and removes
-    ``armed/<id>.json``.
-
-    If the arm has vanished by then, whoever armed the run has abandoned it,
-    and the claim is void.
+    The winner is the caller whose exclusive create of ``claimed/<id>.json``
+    succeeds. It copies the arm into that file and removes ``armed/<id>.json``.
+    If the arm file has vanished by then, the run was abandoned and the claim
+    is void.
     """
     try:
         src = arm_path(base_dir, arm_id)
@@ -371,9 +384,8 @@ def claim(base_dir: os.PathLike | str, arm_id: str) -> bool:
 
 
 def write_ledger(base_dir: os.PathLike | str, arm_id: str, data: dict) -> bool:
-    """Replace ``claimed/<id>.json`` with ``data``. False, writing nothing,
-    if the claimed file is gone: the run was abandoned by whoever armed it,
-    and a ledger must not come back from the dead."""
+    """Replace ``claimed/<id>.json`` with ``data``. Returns False and writes
+    nothing if the claimed file is gone: the run was abandoned."""
     path = claimed_path(base_dir, arm_id)
     if not path.is_file():
         return False
@@ -399,8 +411,7 @@ def pong_path(base_dir: os.PathLike | str, nonce: str) -> Path:
     return safe_join(base_dir, PONG_DIR, validate_arm_id(nonce) + ".json")
 
 
-#: Hermes's truthy strings (``utils.TRUTHY_STRINGS``), as ``tools/approval.py``
-#: reads ``HERMES_YOLO_MODE`` into ``_YOLO_MODE_FROZEN`` when it is imported.
+#: The strings Hermes reads as true in ``HERMES_YOLO_MODE``.
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 

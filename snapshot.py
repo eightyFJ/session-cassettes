@@ -1,22 +1,18 @@
 """Workspace snapshot: captured at record time, searched at replay time.
 
-At record time the cassette also stores the text of every workspace file that a
-``search_files`` result named or a ``read_file`` call read (docs/PLAN.md,
-decision of 2026-11-10, "snapshot + search for replay misses"). At replay time
-a ``read_file`` or ``search_files`` call with no exact recording is answered by
+At record time the cassette stores the text of every workspace file that a
+``read_file`` call read or a ``search_files`` result named. At replay time a
+``read_file`` or ``search_files`` call with no exact recording is answered by
 a pure-Python slice or search over that snapshot, in the JSON shape Hermes's
-own tools return (``tools/file_operations_common.py``: ``ReadResult``,
-``SearchResult.to_dict(densify=True)``). No real tool runs.
+own tools return. No real tool runs. A call that reaches outside the snapshot
+returns ``None``, which the caller turns into a ``cassette miss``.
 
-A call that reaches outside the snapshot returns ``None``; the caller turns
-that into a ``cassette miss``.
-
-Limits of the imitation, stated plainly:
-- Python ``re`` stands in for ripgrep's regex engine. Simple patterns behave
-  the same; exotic syntax can differ.
-- Only snapshot files are searched, so a synthesized search can report fewer
-  matches than a live search of the whole folder would.
-- ``order: "modified"`` is ignored (the snapshot has no modification times).
+Limits:
+- Python ``re`` stands in for ripgrep's regex engine, so unusual syntax can
+  behave differently.
+- Only snapshot files are searched, so a search can report fewer matches than
+  a live search of the whole folder.
+- ``order: "modified"`` is ignored: the snapshot has no modification times.
 """
 
 from __future__ import annotations
@@ -41,7 +37,6 @@ _SECRET_GLOBS = (
     "id_rsa*", "id_dsa*", "id_ecdsa*", "id_ed25519*",
     "credentials", "credentials.*", "*.env",
     "secrets.json", "secrets.yaml", "secrets.yml", "secrets.toml",
-    # Login stores (catalog rule 11 names Hermes's auth.json).
     "auth.json", "token.json", "tokens.json",
 )
 
@@ -111,20 +106,17 @@ def capture(
     """Add workspace files to ``cassette.snapshot``. Returns ``(path, reason)``
     notes for files it skipped. Never raises.
 
-    ``redact(text, path)`` should be Hermes's own secret redaction: a live
-    ``read_file`` result is redacted by Hermes, and the snapshot is read
-    straight from disk, so without it the cassette could hold secrets the
-    live session never showed the model. If ``redact`` raises, the file is
-    skipped rather than stored unredacted.
+    ``redact(text, path)`` should be Hermes's own secret redaction, so the
+    snapshot holds nothing a live ``read_file`` would have hidden. A file
+    whose redaction fails is skipped.
     """
     notes: list = []
     cwd = cassette.cwd or None
     if not cassette.workspace:
         return [("*", "cassette has no workspace")]
     ws_key = normalize_path(cassette.workspace, cwd)
-    # The workspace's own path may run through a link (a Windows junction,
-    # macOS's /tmp). A file's real path is then compared with the workspace's
-    # real path too, or every file would look like a link leading out.
+    # The workspace path may itself run through a link (a Windows junction,
+    # macOS's /tmp), so a file's real path is checked against both spellings.
     try:
         real_ws_key = normalize_path(os.path.realpath(display_path(cassette.workspace, cwd)), cwd)
     except Exception:
@@ -276,9 +268,9 @@ def _glob_match(glob: str, rel: str) -> bool:
 
 
 def _scope(cassette: Cassette, raw_root: Any) -> Optional[list]:
-    """Snapshot entries under the search root, as ``(shown path, key, entry,
-    path relative to the root)``, sorted. None when the root is outside the workspace or the snapshot holds
-    nothing under it (the cassette knows nothing there: a real miss)."""
+    """Snapshot entries under the search root, sorted, as ``(shown path, key,
+    entry, path relative to the root)``. None when the root is outside the
+    workspace or the snapshot holds nothing under it."""
     cwd = cassette.cwd or None
     if raw_root is None or (isinstance(raw_root, str) and not raw_root.strip()):
         raw_root = "."

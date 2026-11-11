@@ -1,4 +1,4 @@
-"""``hermes cassette ...`` (cli.py): block D of docs/PLAN.md.
+"""``hermes cassette ...`` (cli.py).
 
 The replay tests start a real child process, ``fake_hermes.py``, in place of
 ``hermes chat -Q --query``. It drives the plugin's real hooks and middleware, so the
@@ -369,7 +369,7 @@ class CommandInjection(CliCase):
         self.assertFalse(arms.waiting_arms(self.data))
 
     def test_printed_answer_may_be_the_gateways_redacted_copy(self):
-        # Seen live: the ledger had "AUTH_PORT = 8080", hermes chat -Q printed "AUTH_PORT=***".
+        # The ledger holds "AUTH_PORT = 8080"; hermes chat -Q can print "AUTH_PORT=***".
         mask = lambda text: text.replace("AUTH_PORT = 8080", "AUTH_PORT=***")
         ledger = "Port is set by `AUTH_PORT = 8080`.\nSo: 8080."
         self.assertTrue(cli._same_answer(ledger, "Port is set by `AUTH_PORT=***`.\r\nSo: 8080.\r\n", mask))
@@ -605,8 +605,8 @@ class Preflight(CliCase):
         self.assertRegex(arms.CODE_VERSION, r"^[0-9a-f]{16}$")
 
     def test_a_gateway_in_yolo_mode_stops_the_run(self):
-        # Grok, block F recheck: tools/approval.py freezes the gateway's own
-        # HERMES_YOLO_MODE, and stripping it from the child can't undo that.
+        # The gateway's own HERMES_YOLO_MODE covers every session it hosts;
+        # stripping it from the child can't undo that.
         self.make_cassette()
         with self.plan(ping="yolo"):
             with self.assertRaisesRegex(cli.CliError, "HERMES_YOLO_MODE.*Nothing was replayed"):
@@ -626,7 +626,7 @@ class Preflight(CliCase):
         self.assertTrue(arms.process_yolo({"HERMES_YOLO_MODE": "yes"}))
 
     def test_the_ping_happens_before_the_arm_exists(self):
-        # Grok, block F: an arm waiting during the ping could be claimed by another session.
+        # An arm waiting during the ping could be claimed by another session.
         self.make_cassette()
         waiting_at_ping = []
 
@@ -641,8 +641,8 @@ class Preflight(CliCase):
         self.assertEqual(waiting_at_ping, [0])
 
     def test_no_session_id_on_stderr_is_invalid(self):
-        # Grok, block F: without the id, a foreign ledger whose answer (or its
-        # redacted copy) equals stdout would otherwise grade.
+        # Without the id, a foreign ledger whose answer (or its redacted copy)
+        # equals stdout would grade.
         self.make_cassette()
         with self.plan(session=""):
             v, _, _ = self.replay()

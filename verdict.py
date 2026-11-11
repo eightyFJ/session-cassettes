@@ -1,16 +1,16 @@
 """Pinned-fact matching, the verdict, and the plain-text result table.
 
-Decision 6 (docs/PLAN.md), amended:
 - INVALID overrides everything: the run can't be trusted to have been a replay
-  (arm never claimed, arm left over, answer doesn't match the child's stdout,
+  (arm never claimed, arm left over, answer doesn't match the child's output,
   no final answer). An INVALID run is never PASS.
-- FAIL: a pin is missing from the final answer (a miss count is noted).
+- FAIL: a pin is missing from the final answer.
 - DIVERGED: every pin matched, but one or more tool calls missed the cassette.
-- PASS: every pin matched and there were zero misses. Synthesized answers
-  from the snapshot do not count as misses.
-The "path" column describes the calls. It never sets the result.
+- PASS: every pin matched and there were no misses. Answers synthesized from
+  the snapshot do not count as misses.
 
-Standard library only; no ANSI colour when NO_COLOR is set or the stream is
+The "path" line describes the calls. It never sets the result.
+
+Standard library only. No ANSI colour when NO_COLOR is set or the stream is
 not a terminal.
 """
 
@@ -201,7 +201,7 @@ def use_colour(stream: Any = None) -> bool:
         return False
 
 
-def _paint(text: str, result: str, colour: bool) -> str:
+def paint(text: str, result: str, colour: bool) -> str:
     if not colour or result not in _COLOURS:
         return text
     return f"\x1b[1;{_COLOURS[result]}m{text}\x1b[0m"
@@ -213,7 +213,7 @@ def render_verdict(v: Verdict, title: str = "", colour: Optional[bool] = None) -
     lines = []
     if title:
         lines.append(title)
-    lines.append(f"  result  {_paint(v.result, v.result, colour)}"
+    lines.append(f"  result  {paint(v.result, v.result, colour)}"
                  + (f"  ({'; '.join(v.notes)})" if v.notes else ""))
     lines.append(f"  pins    {v.pins_matched}/{len(v.pins)}")
     for p in v.pins:
@@ -242,7 +242,7 @@ def render_table(rows: Sequence[dict], colour: Optional[bool] = None) -> str:
         out = []
         for i, val in enumerate(values):
             padded = val if i == len(values) - 1 else val.ljust(widths[i])
-            out.append(_paint(padded, result, colour) if i == 2 and result else padded)
+            out.append(paint(padded, result, colour) if i == 2 and result else padded)
         return "  ".join(out).rstrip()
 
     lines = [fmt(headers)]
